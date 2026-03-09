@@ -1,0 +1,2 @@
+"""boatrace-ai package."""
+

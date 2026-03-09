@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+src/boatrace_ai/__init__.py
+src/boatrace_ai/__main__.py
+src/boatrace_ai/cli.py
+src/boatrace_ai.egg-info/PKG-INFO
+src/boatrace_ai.egg-info/SOURCES.txt
+src/boatrace_ai.egg-info/dependency_links.txt
+src/boatrace_ai.egg-info/top_level.txt
+src/boatrace_ai/collect/__init__.py
+src/boatrace_ai/evaluate/__init__.py
+src/boatrace_ai/features/__init__.py
+src/boatrace_ai/predict/__init__.py
+src/boatrace_ai/train/__init__.py
+tests/test_cli.py

@@ -1,0 +1,26 @@
+{
+  "project": {
+    "name": "boatrace-ai",
+    "timezone": "Asia/Tokyo"
+  },
+  "paths": {
+    "raw_dir": "data/raw",
+    "processed_dir": "data/processed",
+    "external_dir": "data/external",
+    "model_dir": "artifacts/models",
+    "prediction_dir": "artifacts/predictions"
+  },
+  "dataset": {
+    "target": "win",
+    "lookback_days": 365,
+    "train_end_date": "2025-12-31"
+  },
+  "model": {
+    "type": "lightgbm",
+    "random_state": 42
+  },
+  "inference": {
+    "race_date": null,
+    "venues": []
+  }
+}
