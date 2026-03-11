@@ -1,98 +1,137 @@
 # boatrace-ai
 
-ボートレースの予測・分析パイプライン。データ収集からモデル学習、予測、note.com記事自動生成までを一気通貫で行う。
+Public starter repository for building a boat race prediction pipeline.
 
-## Features
+This repository is intentionally scoped as a standalone project rather than a subdirectory inside `coconala-tools`.
+The expected workflow is:
 
-- **データ収集** (`collect`): レースデータをスクレイピング・API取得
-- **特徴量生成** (`build-dataset`): 生データからモデル用テーブルを構築
-- **モデル学習** (`train`): LightGBMベースの予測モデルを訓練
-- **予測** (`predict`): 指定日のレース結果を予測
-- **note記事生成 (朝)** (`note-morning`): 予測データから有料記事HTMLを生成（回収率中心訴求）
-- **note記事生成 (夜)** (`note-evening`): 結果APIと突合して無料実績記事HTMLを生成（回収率推移付き）
+1. Collect race, player, weather, and result data.
+2. Build training datasets and feature tables.
+3. Train baseline models for win/place probability.
+4. Evaluate model quality and backtest betting rules.
+5. Run daily prediction jobs with versioned outputs.
 
-## Quick Start
+## Current status
 
-```bash
-pip install -e .
-# or
-pip install -r requirements.txt
-```
+Current repository includes:
 
-## CLI Usage
+- a package layout under `src/boatrace_ai/`
+- a JSON config template under `configs/`
+- architecture and roadmap documents under `docs/`
+- a working `collect` command that stores one-race-per-file raw JSON from official pages
+- a working `build-dataset` command that expands raw race records into entrant-level rows
+- a working `train` command that fits a holdout-tested gradient boosting win model, learns a betting policy, and saves artifacts
+- out-of-fold probability calibration that is applied only when it improves training-side calibration metrics
+- a working `backtest` command that runs holdout evaluation with flat, Kelly, and capped-Kelly bankroll simulation
+- a working `predict` command that uses the latest trained model when available, otherwise falls back to the baseline scorer
+- ROI-oriented trifecta recommendations that use official live `odds3t` when available and historical payout priors as fallback
+- `note-morning` / `note-evening` commands that turn prediction and verification JSON into note-style article HTML
+- parser, dataset, and training tests that run without live network access
 
-```bash
-# パイプライン（スタブ）
-boatrace-ai collect --config configs/base.json
-boatrace-ai build-dataset
-boatrace-ai train
-boatrace-ai predict --race-date 2026-03-09
+## Project layout
 
-# note記事生成
-boatrace-ai note-morning --race-date 2026-03-09   # 朝の有料予測記事
-boatrace-ai note-evening --race-date 2026-03-09   # 夜の無料実績記事
-```
-
-### note-morning (朝の有料記事)
-
-予測JSONを読み込み、回収率を最大の訴求ポイントとした記事HTMLを生成:
-- **無料パート**: 累積回収率ヒーロー表示 → 回収率推移テーブル → 分析サマリー → 注目の穴予測 → CTA
-- **有料パート**: 期待回収率TOP20テーブル → 全買い目 → 場別詳細分析 → 買い方ガイド
-
-### note-evening (夜の無料記事)
-
-レース結果APIから当日結果を取得し、朝の予測と突合:
-- 回収率ヒーローセクション（本日 + 累積）
-- 回収率推移テーブル（日別一覧）
-- 的中買い目テーブル（配当・回収率付き）
-- 場別回収率（ROI降順）
-- 不的中一覧・AI予測精度
-
-## Project Layout
-
-```
+```text
 boatrace-ai/
 ├── configs/
-│   └── base.json
+├── docs/
 ├── data/
 │   ├── external/
 │   ├── processed/
 │   └── raw/
 ├── src/
 │   └── boatrace_ai/
+│       ├── collect/
+│       ├── evaluate/
+│       ├── features/
+│       ├── predict/
+│       ├── train/
 │       ├── __init__.py
 │       ├── __main__.py
-│       ├── cli.py              # CLI entrypoint
-│       ├── collect/            # データ収集
-│       ├── evaluate/           # 評価
-│       ├── features/           # 特徴量生成
-│       ├── note/               # note.com記事生成
-│       │   ├── __init__.py
-│       │   ├── morning.py      # 朝の有料予測記事
-│       │   └── evening.py      # 夜の無料実績記事
-│       ├── predict/            # 予測
-│       └── train/              # モデル学習
-├── tests/
-│   └── test_cli.py
-├── pyproject.toml
-├── requirements.txt
-└── README.md
+│       └── cli.py
+└── tests/
 ```
 
-## Output
+## Planning docs
 
-記事生成コマンドは `output/` ディレクトリに以下を出力:
+- `docs/implementation-plan.md`
+  Current implementation, corrected assumptions, target architecture, and roadmap.
+- `docs/source-registry.md`
+  Source-by-source collection policy, cadence, and usage notes.
 
-| ファイル | 説明 |
-|----------|------|
-| `output/note/morning_YYYYMMDD.html` | 朝の有料記事HTML |
-| `output/note/morning_YYYYMMDD_title.txt` | 朝の記事タイトル |
-| `output/note/evening_YYYYMMDD.html` | 夜の無料記事HTML |
-| `output/note/evening_YYYYMMDD_title.txt` | 夜の記事タイトル |
-| `output/data/predictions_YYYYMMDD.json` | 予測データ |
-| `output/data/verification_YYYYMMDD.json` | 検証データ |
-| `output/data/cumulative_results.json` | 累積成績 |
+## Setup
 
-## License
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+```
 
-Private
+## CLI
+
+```bash
+python -m boatrace_ai collect --start-date 2026-03-08 --end-date 2026-03-09 --venue 24
+python -m boatrace_ai build-dataset --input-dir data/raw --output-dir data/processed
+python -m boatrace_ai train --dataset-path data/processed/entrants.csv --raw-dir data/raw --train-end-date 2026-03-08
+python -m boatrace_ai backtest --dataset-path data/processed/entrants.csv --raw-dir data/raw --train-end-date 2026-03-09 --bankroll-mode all --kelly-cap-fraction 0.05 --max-bet-bankroll-fraction 0.02 --max-race-exposure-fraction 0.15
+python -m boatrace_ai predict --race-date 2026-03-10 --min-probability 0.12
+python -m boatrace_ai predict --race-date 2026-03-10 --venue 24 --race-no 12
+python -m boatrace_ai note-morning --race-date 2026-03-10
+python -m boatrace_ai note-evening --race-date 2026-03-09
+```
+
+`collect` stores raw JSON under `data/raw/YYYYMMDD/`, including `beforeinfo`, `result`, and `trifecta_odds` when available.
+`build-dataset` writes entrant-level rows to `data/processed/entrants.csv`.
+`train` saves a `joblib` artifact under `artifacts/models/` together with holdout metrics, walk-forward backtest metrics, payout priors, historical odds-aware backtest inputs, and the selected betting policy.
+`backtest` saves a JSON file under `artifacts/backtests/` and reports holdout metrics plus bankroll simulation for `flat`, `kelly`, and `kelly_capped`.
+`predict` saves a JSON file under `artifacts/predictions/` and prints the top win candidates, leading trifecta combinations, and the highest-EV bets.
+`note-morning` and `note-evening` write HTML and title text files under `artifacts/note/`.
+
+The current trained path uses official race-card features plus `beforeinfo` features such as exhibition time, tilt, adjusted weight, start display ST, and weather.
+The win model is a `HistGradientBoostingClassifier`, and trifecta candidates are derived from entrant win weights with a Plackett-Luce style ranking step.
+The training pipeline fits an out-of-fold Platt calibrator when it improves Brier score and log loss, and the saved artifact reuses that calibrator for prediction.
+ROI-oriented recommendation logic continues to use raw model ranking weights so calibration does not collapse bet coverage.
+Expected value is computed from official live trifecta odds when that page is available; otherwise the system falls back to smoothed historical payout estimates by venue and combination.
+When the historical data contains large date gaps, model fitting still uses all complete venue-days, but betting-policy selection and walk-forward checks focus on the most recent contiguous block.
+Venue-days that are missing races are treated as incomplete and are excluded from training/backtest evaluation until the missing raw files are collected.
+The betting policy now filters on `min_expected_value`, `min_probability`, and `min_edge`, and the search includes single-ticket candidate pools for higher-ROI, lower-volume betting.
+The backtest path now includes bankroll simulation for flat staking, fractional Kelly staking, capped Kelly, optional daily stop-loss / take-profit, and optional race-level exposure caps.
+The default risk template keeps Kelly-style staking conservative with `kelly_cap_fraction=0.05`, `max_bet_bankroll_fraction=0.02`, and `max_race_exposure_fraction=0.15`.
+
+Items such as official bulk-download ingestion, external weather/tide joins, model serving APIs, UI, schedulers, and monitoring are target architecture items documented in `docs/implementation-plan.md`; they are not all implemented in the current codebase.
+
+## Prediction Output
+
+Prediction JSON now contains:
+
+- `races`: full entrant/trifecta prediction details
+- `race_predictions`: simplified race-level view for downstream publishing
+- `recommendations`: ROI-ranked trifecta bets with probability, payout estimate, and expected value
+- `recommendations[*].edge`: model probability minus market implied probability
+- `betting_policy`: threshold and per-race cap used to select bets
+- `model_metrics`: holdout metrics plus walk-forward recommendation ROI embedded from the trained artifact
+
+## note Commands
+
+`note-morning` reads the latest prediction file for a date and generates a morning article focused on expected ROI.
+`note-evening` re-fetches official race results, verifies recommended bets, updates cumulative ROI, and generates a review article plus verification JSON.
+
+## Suggested roadmap
+
+### Phase 1
+
+- Decide data source policy and legal constraints.
+- Normalize race-level, racer-level, and venue-level tables.
+- Define the target labels for 1st place, top-3, and trifecta ranking tasks.
+
+### Phase 2
+
+- Build a baseline feature store.
+- Train a simple gradient boosting model.
+- Track offline metrics by venue, weather, and race class.
+
+### Phase 3
+
+- Add calibration, richer ranking models, and bankroll-aware odds filtering.
+- Backtest bet selection rules with bankroll constraints.
+- Automate scheduled collection and daily inference.

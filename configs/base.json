@@ -8,16 +8,103 @@
     "processed_dir": "data/processed",
     "external_dir": "data/external",
     "model_dir": "artifacts/models",
-    "prediction_dir": "artifacts/predictions"
+    "prediction_dir": "artifacts/predictions",
+    "backtest_dir": "artifacts/backtests",
+    "note_dir": "artifacts/note"
   },
   "dataset": {
     "target": "win",
     "lookback_days": 365,
     "train_end_date": "2025-12-31"
   },
+  "data_sources": {
+    "official_html": {
+      "enabled": true,
+      "role": "current_realtime_collection",
+      "pages": [
+        "race_index",
+        "racelist",
+        "beforeinfo",
+        "raceresult",
+        "odds3t"
+      ]
+    },
+    "official_download": {
+      "enabled": false,
+      "role": "planned_historical_bulk_ingestion",
+      "assets": [
+        "race_results",
+        "race_programs",
+        "season_racer_stats"
+      ]
+    },
+    "weather": {
+      "enabled": false,
+      "provider": "jma",
+      "role": "planned_feature_enrichment"
+    },
+    "tide": {
+      "enabled": false,
+      "provider": "jma",
+      "role": "planned_feature_enrichment"
+    },
+    "motor_site": {
+      "enabled": false,
+      "provider": "venue_sites",
+      "role": "planned_feature_enrichment"
+    }
+  },
   "model": {
-    "type": "lightgbm",
+    "type": "hist_gradient_boosting",
     "random_state": 42
+  },
+  "validation": {
+    "split_strategy": "time_series_holdout",
+    "fit_window": "all_complete_venue_days",
+    "policy_selection_window": "recent_contiguous_block",
+    "recent_block_max_gap_days": 3,
+    "walk_forward_min_train_races": 8,
+    "metrics": [
+      "log_loss",
+      "brier_score",
+      "roc_auc",
+      "recommendation_roi",
+      "walk_forward_recommendation_roi"
+    ]
+  },
+  "training_guards": {
+    "min_recommendation_roi": 1.2,
+    "min_walk_forward_recommendation_roi": 1.2
+  },
+  "betting": {
+    "min_expected_value": 1.05,
+    "max_per_race": 1,
+    "candidate_pool_size": 1,
+    "min_probability": 0.3,
+    "min_edge": 0.0
+  },
+  "risk_management": {
+    "bankroll_mode": "flat",
+    "kelly_fraction": 0.25,
+    "kelly_cap_fraction": 0.05,
+    "max_bet_bankroll_fraction": 0.02,
+    "max_daily_bets": null,
+    "max_daily_investment_yen": null,
+    "max_race_exposure_fraction": 0.15,
+    "daily_stop_loss_yen": null,
+    "daily_take_profit_yen": null,
+    "require_tax_and_limit_review": true
+  },
+  "serving": {
+    "api_mode": "planned",
+    "web_ui": "planned",
+    "note_generation": "enabled"
+  },
+  "operations": {
+    "collector_schedule": "planned",
+    "retrain_schedule": "planned",
+    "monitoring": "planned",
+    "ci_cd": "planned"
   },
   "inference": {
     "race_date": null,
