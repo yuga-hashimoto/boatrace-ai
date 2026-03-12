@@ -1,3 +1,7 @@
+from pathlib import Path
+from types import SimpleNamespace
+
+from boatrace_ai import cli
 from boatrace_ai.cli import build_parser
 
 
@@ -16,6 +20,10 @@ def test_predict_command_accepts_race_date():
             "0.08",
             "--min-edge",
             "0.02",
+            "--min-market-odds",
+            "70",
+            "--max-market-odds",
+            "120",
         ]
     )
 
@@ -25,6 +33,8 @@ def test_predict_command_accepts_race_date():
     assert args.race_no == 12
     assert args.min_probability == 0.08
     assert args.min_edge == 0.02
+    assert args.min_market_odds == 70
+    assert args.max_market_odds == 120
 
 
 def test_collect_command_accepts_force():
@@ -125,3 +135,104 @@ def test_note_evening_command_accepts_max_workers():
     assert args.command == "note-evening"
     assert args.race_date == "2026-03-10"
     assert args.max_workers == 2
+
+
+def test_import_db_command_accepts_filters():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "import-db",
+            "--input-dir",
+            "data/raw",
+            "--db-path",
+            "data/external/history.sqlite",
+            "--start-date",
+            "2025-03-11",
+            "--end-date",
+            "2026-03-10",
+            "--venue",
+            "24",
+        ]
+    )
+
+    assert args.command == "import-db"
+    assert args.db_path == "data/external/history.sqlite"
+    assert args.start_date == "2025-03-11"
+    assert args.end_date == "2026-03-10"
+    assert args.venue == ["24"]
+
+
+def test_sync_db_command_accepts_lookback_days():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "sync-db",
+            "--race-date",
+            "2026-03-10",
+            "--lookback-days",
+            "365",
+            "--db-path",
+            "data/external/history.sqlite",
+        ]
+    )
+
+    assert args.command == "sync-db"
+    assert args.lookback_days == 365
+    assert args.db_path == "data/external/history.sqlite"
+
+
+def test_sync_download_db_command_accepts_lookback_days():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "sync-download-db",
+            "--race-date",
+            "2026-03-10",
+            "--lookback-days",
+            "365",
+            "--db-path",
+            "data/external/history.sqlite",
+            "--max-workers",
+            "8",
+        ]
+    )
+
+    assert args.command == "sync-download-db"
+    assert args.lookback_days == 365
+    assert args.db_path == "data/external/history.sqlite"
+    assert args.max_workers == 8
+
+
+def test_predict_venue_command_targets_all_races(monkeypatch, tmp_path: Path):
+    captured: dict[str, list[int]] = {}
+
+    class FakeClient:
+        def fetch_race_index(self, race_date: str):
+            assert race_date == "2026-03-10"
+            return [SimpleNamespace(venue_code="24", venue_name="大村")]
+
+        def close(self) -> None:
+            return None
+
+    def fake_fetch_predictions(**kwargs):
+        captured["race_numbers"] = kwargs["race_numbers"]
+        return []
+
+    monkeypatch.setattr(cli, "OfficialBoatraceClient", FakeClient)
+    monkeypatch.setattr(cli, "_fetch_predictions", fake_fetch_predictions)
+    monkeypatch.setattr(cli, "_build_recommendations", lambda predictions, artifact, betting_policy: [])
+
+    exit_code = cli.main(
+        [
+            "predict-venue",
+            "--race-date",
+            "2026-03-10",
+            "--venue",
+            "24",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["race_numbers"] == list(range(1, 13))

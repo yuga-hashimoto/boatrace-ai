@@ -19,11 +19,14 @@ Current repository includes:
 - a JSON config template under `configs/`
 - architecture and roadmap documents under `docs/`
 - a working `collect` command that stores one-race-per-file raw JSON from official pages
-- a working `build-dataset` command that expands raw race records into entrant-level rows
+- a working `sync-download-db` command that backfills daily official `B` / `K` LZH downloads into raw JSON and SQLite
+- a SQLite history store that can archive race records for the last year or longer under `data/external/history.sqlite`
+- a working `import-db` / `sync-db` flow that moves collected raw records into the history DB
+- a working `build-dataset` command that expands either raw race records or DB-stored history into entrant-level rows
 - a working `train` command that fits a holdout-tested gradient boosting win model, learns a betting policy, and saves artifacts
 - out-of-fold probability calibration that is applied only when it improves training-side calibration metrics
 - a working `backtest` command that runs holdout evaluation with flat, Kelly, and capped-Kelly bankroll simulation
-- a working `predict` command that uses the latest trained model when available, otherwise falls back to the baseline scorer
+- a working `predict` / `predict-venue` command that uses the latest trained model when available, otherwise falls back to the baseline scorer
 - ROI-oriented trifecta recommendations that use official live `odds3t` when available and historical payout priors as fallback
 - `note-morning` / `note-evening` commands that turn prediction and verification JSON into note-style article HTML
 - parser, dataset, and training tests that run without live network access
@@ -44,6 +47,7 @@ boatrace-ai/
 │       ├── evaluate/
 │       ├── features/
 │       ├── predict/
+│       ├── store/
 │       ├── train/
 │       ├── __init__.py
 │       ├── __main__.py
@@ -71,20 +75,29 @@ pip install -e .
 
 ```bash
 python -m boatrace_ai collect --start-date 2026-03-08 --end-date 2026-03-09 --venue 24
+python -m boatrace_ai import-db --input-dir data/raw --db-path data/external/history.sqlite
+python -m boatrace_ai sync-db --race-date 2026-03-10 --lookback-days 365 --venue 24 --db-path data/external/history.sqlite
+python -m boatrace_ai sync-download-db --race-date 2026-03-10 --lookback-days 366 --db-path data/external/history.sqlite --max-workers 8
 python -m boatrace_ai build-dataset --input-dir data/raw --output-dir data/processed
+python -m boatrace_ai build-dataset --input-db data/external/history.sqlite --dataset-path data/processed/entrants_from_db.csv
 python -m boatrace_ai train --dataset-path data/processed/entrants.csv --raw-dir data/raw --train-end-date 2026-03-08
 python -m boatrace_ai backtest --dataset-path data/processed/entrants.csv --raw-dir data/raw --train-end-date 2026-03-09 --bankroll-mode all --kelly-cap-fraction 0.05 --max-bet-bankroll-fraction 0.02 --max-race-exposure-fraction 0.15
 python -m boatrace_ai predict --race-date 2026-03-10 --min-probability 0.12
 python -m boatrace_ai predict --race-date 2026-03-10 --venue 24 --race-no 12
+python -m boatrace_ai predict-venue --race-date 2026-03-10 --venue 24
 python -m boatrace_ai note-morning --race-date 2026-03-10
 python -m boatrace_ai note-evening --race-date 2026-03-09
 ```
 
 `collect` stores raw JSON under `data/raw/YYYYMMDD/`, including `beforeinfo`, `result`, and `trifecta_odds` when available.
-`build-dataset` writes entrant-level rows to `data/processed/entrants.csv`.
+`import-db` stores one race per row in `data/external/history.sqlite`, so one-year history can be queried without walking the raw tree.
+`sync-db` is the one-shot command for "collect the last N days and push them into SQLite".
+`sync-download-db` is the fast historical backfill path. It downloads official daily `B` / `K` LZH files, expands them into race JSON, and upserts SQLite without per-race HTML fetches.
+`build-dataset` writes entrant-level rows to `data/processed/entrants.csv` from either raw JSON or the history DB.
 `train` saves a `joblib` artifact under `artifacts/models/` together with holdout metrics, walk-forward backtest metrics, payout priors, historical odds-aware backtest inputs, and the selected betting policy.
 `backtest` saves a JSON file under `artifacts/backtests/` and reports holdout metrics plus bankroll simulation for `flat`, `kelly`, and `kelly_capped`.
 `predict` saves a JSON file under `artifacts/predictions/` and prints the top win candidates, leading trifecta combinations, and the highest-EV bets.
+`predict` without `--race-no` already targets all races in the selected venue set, and `predict-venue` makes that venue-wide mode explicit.
 `note-morning` and `note-evening` write HTML and title text files under `artifacts/note/`.
 
 The current trained path uses official race-card features plus `beforeinfo` features such as exhibition time, tilt, adjusted weight, start display ST, and weather.
@@ -98,7 +111,7 @@ The betting policy now filters on `min_expected_value`, `min_probability`, and `
 The backtest path now includes bankroll simulation for flat staking, fractional Kelly staking, capped Kelly, optional daily stop-loss / take-profit, and optional race-level exposure caps.
 The default risk template keeps Kelly-style staking conservative with `kelly_cap_fraction=0.05`, `max_bet_bankroll_fraction=0.02`, and `max_race_exposure_fraction=0.15`.
 
-Items such as official bulk-download ingestion, external weather/tide joins, model serving APIs, UI, schedulers, and monitoring are target architecture items documented in `docs/implementation-plan.md`; they are not all implemented in the current codebase.
+Items such as additional official download assets beyond `B` / `K`, external weather/tide joins, model serving APIs, UI, schedulers, and monitoring are target architecture items documented in `docs/implementation-plan.md`; they are not all implemented in the current codebase.
 
 ## Prediction Output
 

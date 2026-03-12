@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from boatrace_ai.collect.history import iter_race_record_paths, load_race_record
+from boatrace_ai.collect.official import compact_race_date, restore_race_date
+from boatrace_ai.store.sqlite import iter_race_records_from_db
 
 
 FEATURE_COLUMNS = [
@@ -66,11 +68,48 @@ TARGET_COLUMNS = [
 DATASET_COLUMNS = META_COLUMNS + FEATURE_COLUMNS + TARGET_COLUMNS
 
 
-def build_dataset(input_dir: Path, output_path: Path) -> dict[str, Any]:
+def build_dataset(
+    input_dir: Path | None = None,
+    output_path: Path | None = None,
+    *,
+    db_path: Path | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    venue_filters: list[str] | None = None,
+) -> dict[str, Any]:
+    if output_path is None:
+        raise ValueError("output_path is required")
+
     rows: list[dict[str, Any]] = []
-    record_paths = iter_race_record_paths(input_dir)
-    for path in record_paths:
-        rows.extend(build_rows_from_record(load_race_record(path)))
+    if db_path is not None:
+        records = iter_race_records_from_db(
+            db_path=db_path,
+            start_date=start_date,
+            end_date=end_date,
+            venue_filters=venue_filters,
+        )
+        record_count = len(records)
+        for record in records:
+            rows.extend(build_rows_from_record(record))
+        source = "db"
+    else:
+        if input_dir is None:
+            raise ValueError("input_dir is required when db_path is not provided")
+        record_paths = iter_race_record_paths(input_dir)
+        filtered_records: list[dict[str, Any]] = []
+        for path in record_paths:
+            record = load_race_record(path)
+            if _record_matches_filters(
+                record,
+                start_date=start_date,
+                end_date=end_date,
+                venue_filters=venue_filters,
+            ):
+                filtered_records.append(record)
+        record_count = len(filtered_records)
+        for record in filtered_records:
+            rows.extend(build_rows_from_record(record))
+        source = "raw_dir"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8", newline="") as handle:
@@ -79,11 +118,16 @@ def build_dataset(input_dir: Path, output_path: Path) -> dict[str, Any]:
         writer.writerows([{column: row.get(column) for column in DATASET_COLUMNS} for row in rows])
 
     return {
-        "input_dir": str(input_dir),
+        "source": source,
+        "input_dir": str(input_dir) if input_dir is not None else None,
+        "input_db": str(db_path) if db_path is not None else None,
         "output_path": str(output_path),
-        "records": len(record_paths),
+        "records": record_count,
         "rows": len(rows),
         "feature_columns": FEATURE_COLUMNS,
+        "start_date": _normalize_date(start_date) if start_date else None,
+        "end_date": _normalize_date(end_date) if end_date else None,
+        "venue_filters": venue_filters or [],
     }
 
 
@@ -215,3 +259,32 @@ def _parse_float(value: Any) -> float | None:
     if value in (None, ""):
         return None
     return float(value)
+
+
+def _record_matches_filters(
+    record: dict[str, Any],
+    *,
+    start_date: str | None,
+    end_date: str | None,
+    venue_filters: list[str] | None,
+) -> bool:
+    record_date = _normalize_date(str(record["date"]))
+    if start_date and record_date < _normalize_date(start_date):
+        return False
+    if end_date and record_date > _normalize_date(end_date):
+        return False
+    if not venue_filters:
+        return True
+    venue_code = str(record.get("venue_code", "")).zfill(2)
+    venue_name = str(record.get("venue_name", ""))
+    normalized_filters = [str(value).strip() for value in venue_filters if str(value).strip()]
+    return any(
+        candidate == venue_code
+        or candidate.zfill(2) == venue_code
+        or candidate in venue_name
+        for candidate in normalized_filters
+    )
+
+
+def _normalize_date(value: str) -> str:
+    return restore_race_date(compact_race_date(value))

@@ -10,8 +10,10 @@ import numpy as np
 
 from boatrace_ai.betting import (
     BET_UNIT_YEN,
+    SINGLE_DAY_ROI_BETTING_POLICY,
     build_payout_model,
     compare_bankroll_strategies,
+    evaluate_recommendation_strategy,
 )
 from boatrace_ai.calibration import apply_probability_calibration
 from boatrace_ai.features.dataset import FEATURE_COLUMNS, rows_to_matrix
@@ -88,13 +90,6 @@ def run_holdout_backtest(
     payout_model = build_payout_model(train_rows)
     odds_index = _load_race_odds_index(raw_dir)
 
-    policy_rows = _select_recent_training_rows(train_rows)
-    betting_policy = _derive_betting_policy(
-        policy_rows,
-        odds_index=odds_index,
-        random_state=random_state,
-    )
-
     x_test = np.array(rows_to_matrix(test_rows, feature_columns), dtype=float)
     y_test = np.array([int(row["is_win"]) for row in test_rows], dtype=int)
     raw_probabilities = model.predict_proba(x_test)[:, 1]
@@ -102,6 +97,27 @@ def run_holdout_backtest(
         raw_probabilities,
         calibrator,
     )
+    policy_rows = _select_recent_training_rows(train_rows)
+    betting_policy = _derive_betting_policy(
+        policy_rows,
+        odds_index=odds_index,
+        random_state=random_state,
+    )
+    race_records = _build_race_probability_records(
+        test_rows,
+        raw_probabilities,
+        odds_index=odds_index,
+    )
+    if len({row["date"] for row in test_rows}) == 1:
+        single_day_policy = dict(SINGLE_DAY_ROI_BETTING_POLICY)
+        single_day_summary = evaluate_recommendation_strategy(
+            race_records,
+            payout_model,
+            single_day_policy,
+        )
+        if int(single_day_summary.get("bets") or 0) > 0:
+            betting_policy = single_day_policy
+
     metrics = _evaluate_predictions(
         test_rows,
         y_test,
@@ -112,11 +128,6 @@ def run_holdout_backtest(
         odds_index=odds_index,
     )
     metrics.update(_prefix_calibration_summary(calibration_summary))
-    race_records = _build_race_probability_records(
-        test_rows,
-        raw_probabilities,
-        odds_index=odds_index,
-    )
     bankroll = compare_bankroll_strategies(
         race_records,
         payout_model,

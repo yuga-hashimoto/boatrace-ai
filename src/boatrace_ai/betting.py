@@ -17,6 +17,28 @@ DEFAULT_BETTING_POLICY = {
     "candidate_pool_size": 12,
     "min_probability": 0.0,
     "min_edge": 0.0,
+    "min_market_odds": 0.0,
+    "max_market_odds": None,
+}
+ROI_FOCUSED_BETTING_POLICY = {
+    **DEFAULT_BETTING_POLICY,
+    "min_expected_value": 1.0,
+    "max_per_race": 1,
+    "candidate_pool_size": 12,
+    "min_probability": 0.18,
+    "min_edge": 0.0,
+    "min_market_odds": 70.0,
+    "max_market_odds": 120.0,
+}
+SINGLE_DAY_ROI_BETTING_POLICY = {
+    **DEFAULT_BETTING_POLICY,
+    "min_expected_value": 1.0,
+    "max_per_race": 1,
+    "candidate_pool_size": 1,
+    "min_probability": 0.25,
+    "min_edge": 0.0,
+    "min_market_odds": 50.0,
+    "max_market_odds": 120.0,
 }
 
 
@@ -164,6 +186,13 @@ def generate_trifecta_recommendations(
     candidate_pool_size = max(1, int(resolved_policy.get("candidate_pool_size", 12)))
     min_probability = float(resolved_policy.get("min_probability", 0.0))
     min_edge = float(resolved_policy.get("min_edge", 0.0))
+    min_market_odds = float(resolved_policy.get("min_market_odds", 0.0))
+    max_market_odds_value = resolved_policy.get("max_market_odds")
+    max_market_odds = (
+        None
+        if max_market_odds_value in (None, "")
+        else float(max_market_odds_value)
+    )
 
     venue_int = int(_normalize_venue_code(venue_code))
     candidates: list[BetRecommendation] = []
@@ -183,6 +212,8 @@ def generate_trifecta_recommendations(
             expected_value < min_expected_value
             or probability_ratio < min_probability
             or edge < min_edge
+            or market_odds < min_market_odds
+            or (max_market_odds is not None and market_odds > max_market_odds)
         ):
             continue
         candidates.append(
@@ -617,11 +648,13 @@ def compare_bankroll_strategies(
 
 
 def iter_betting_policies() -> list[dict[str, Any]]:
-    thresholds = [1.05, 1.15, 1.3]
+    thresholds = [1.0, 1.05, 1.15]
     max_per_race_values = [1]
-    candidate_pool_sizes = [1, 2, 3, 4, 6]
-    min_probability_values = [0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
-    min_edge_values = [0.0, 0.01, 0.02, 0.03]
+    candidate_pool_sizes = [1, 3, 6, 12]
+    min_probability_values = [0.18, 0.2, 0.25, 0.3, 0.35]
+    min_edge_values = [0.0, 0.02]
+    min_market_odds_values = [0.0, 50.0, 70.0]
+    max_market_odds_values = [None, 120.0, 200.0]
 
     return [
         {
@@ -630,12 +663,17 @@ def iter_betting_policies() -> list[dict[str, Any]]:
             "candidate_pool_size": candidate_pool_size,
             "min_probability": min_probability,
             "min_edge": min_edge,
+            "min_market_odds": min_market_odds,
+            "max_market_odds": max_market_odds,
         }
         for threshold in thresholds
         for max_per_race in max_per_race_values
         for candidate_pool_size in candidate_pool_sizes
         for min_probability in min_probability_values
         for min_edge in min_edge_values
+        for min_market_odds in min_market_odds_values
+        for max_market_odds in max_market_odds_values
+        if max_market_odds is None or max_market_odds >= min_market_odds
     ]
 
 

@@ -7,6 +7,7 @@
     "raw_dir": "data/raw",
     "processed_dir": "data/processed",
     "external_dir": "data/external",
+    "history_db_path": "data/external/history.sqlite",
     "model_dir": "artifacts/models",
     "prediction_dir": "artifacts/predictions",
     "backtest_dir": "artifacts/backtests",
@@ -77,11 +78,13 @@
     "min_walk_forward_recommendation_roi": 1.2
   },
   "betting": {
-    "min_expected_value": 1.05,
+    "min_expected_value": 1.0,
     "max_per_race": 1,
-    "candidate_pool_size": 1,
-    "min_probability": 0.3,
-    "min_edge": 0.0
+    "candidate_pool_size": 12,
+    "min_probability": 0.18,
+    "min_edge": 0.0,
+    "min_market_odds": 70.0,
+    "max_market_odds": 120.0
   },
   "risk_management": {
     "bankroll_mode": "flat",

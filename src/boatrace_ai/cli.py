@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from boatrace_ai.betting import DEFAULT_BETTING_POLICY, generate_trifecta_recommendations
 from boatrace_ai.collect.history import collect_race_records, refresh_missing_trifecta_odds
+from boatrace_ai.collect.official_download import sync_official_download_to_db
 from boatrace_ai.collect.official import OfficialBoatraceClient, compact_race_date, restore_race_date
 from boatrace_ai.evaluate.backtest import run_holdout_backtest
 from boatrace_ai.features.dataset import build_dataset
@@ -18,6 +19,7 @@ from boatrace_ai.note.evening import generate_evening_note
 from boatrace_ai.note.morning import generate_morning_note
 from boatrace_ai.predict.baseline import RacePrediction, predict_race
 from boatrace_ai.predict.model import predict_race_with_model
+from boatrace_ai.store.sqlite import import_race_records_to_db
 from boatrace_ai.train.model import find_latest_model, load_model_artifact, train_win_model
 
 
@@ -49,10 +51,95 @@ def _collect_handler(args: argparse.Namespace) -> int:
 
 
 def _build_dataset_handler(args: argparse.Namespace) -> int:
-    input_dir = Path(args.input_dir or args.output_dir)
-    output_path = Path(args.dataset_path or Path(args.output_dir) / "entrants.csv")
-    summary = build_dataset(input_dir=input_dir, output_path=output_path)
+    config = _load_config(Path(args.config))
+    output_dir = Path(args.output_dir or config.get("paths", {}).get("processed_dir", "data/processed"))
+    output_path = Path(args.dataset_path or output_dir / "entrants.csv")
+    input_db = Path(args.input_db) if args.input_db else None
+    input_dir = None if input_db else Path(args.input_dir or config.get("paths", {}).get("raw_dir", "data/raw"))
+    summary = build_dataset(
+        input_dir=input_dir,
+        output_path=output_path,
+        db_path=input_db,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        venue_filters=args.venue,
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _import_db_handler(args: argparse.Namespace) -> int:
+    config = _load_config(Path(args.config))
+    input_dir = Path(args.input_dir or config.get("paths", {}).get("raw_dir", "data/raw"))
+    db_path = Path(args.db_path or _default_history_db_path(config))
+    summary = import_race_records_to_db(
+        input_dir=input_dir,
+        db_path=db_path,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        venue_filters=args.venue,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _sync_db_handler(args: argparse.Namespace) -> int:
+    config = _load_config(Path(args.config))
+    end_date = _resolve_race_date(args.race_date, config)
+    start_date = (_parse_race_date(end_date) - timedelta(days=max(args.lookback_days - 1, 0))).isoformat()
+    output_dir = Path(args.output_dir or config.get("paths", {}).get("raw_dir", "data/raw"))
+    venue_filters = args.venue or config.get("inference", {}).get("venues", [])
+    collection_summary = collect_race_records(
+        output_dir=output_dir,
+        start_date=start_date,
+        end_date=end_date,
+        venue_filters=venue_filters,
+        race_numbers=[args.race_no] if args.race_no else None,
+        include_beforeinfo=not args.no_beforeinfo,
+        include_results=not args.no_results,
+        include_odds=not args.no_odds,
+        max_workers=args.max_workers,
+        skip_existing=not args.force,
+        request_timeout=args.request_timeout,
+        request_max_retries=args.request_max_retries,
+        request_retry_backoff_seconds=args.request_retry_backoff_seconds,
+    )
+    db_summary = import_race_records_to_db(
+        input_dir=output_dir,
+        db_path=Path(args.db_path or _default_history_db_path(config)),
+        start_date=start_date,
+        end_date=end_date,
+        venue_filters=venue_filters,
+    )
+    print(
+        json.dumps(
+            {
+                "sync_start_date": start_date,
+                "sync_end_date": end_date,
+                "lookback_days": args.lookback_days,
+                "collection": collection_summary.to_dict(),
+                "db_import": db_summary,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _sync_download_db_handler(args: argparse.Namespace) -> int:
+    config = _load_config(Path(args.config))
+    end_date = _resolve_race_date(args.race_date, config)
+    start_date = (_parse_race_date(end_date) - timedelta(days=max(args.lookback_days - 1, 0))).isoformat()
+    summary = sync_official_download_to_db(
+        output_dir=Path(args.output_dir or config.get("paths", {}).get("raw_dir", "data/raw")),
+        db_path=Path(args.db_path or _default_history_db_path(config)),
+        start_date=start_date,
+        end_date=end_date,
+        max_workers=args.max_workers,
+        request_timeout=args.request_timeout,
+    )
+    print(json.dumps(summary.to_dict(), ensure_ascii=False, indent=2))
     return 0
 
 
@@ -163,6 +250,7 @@ def _predict_handler(args: argparse.Namespace) -> int:
     config = _load_config(Path(args.config))
     race_date = _resolve_race_date(args.race_date, config)
     venue_filters = args.venue or config.get("inference", {}).get("venues", [])
+    race_no = getattr(args, "race_no", None)
 
     artifact = _load_prediction_artifact(args.model_path, config)
     betting_policy = _resolve_betting_policy(args, config, artifact)
@@ -172,7 +260,7 @@ def _predict_handler(args: argparse.Namespace) -> int:
         if not venues:
             raise ValueError("No active venues matched the current filters.")
 
-        race_numbers = [args.race_no] if args.race_no else list(range(1, 13))
+        race_numbers = list(range(1, 13)) if args.command == "predict-venue" else ([race_no] if race_no else list(range(1, 13)))
         predictions = _fetch_predictions(
             race_date=race_date,
             venues=venues,
@@ -197,11 +285,11 @@ def _predict_handler(args: argparse.Namespace) -> int:
             "generated_at": datetime.now(tz=DEFAULT_TIMEZONE).isoformat(),
             "model_metrics": artifact.get("metrics") if artifact else {},
             "betting_policy": betting_policy,
-            "filters": {
-                "venue": venue_filters,
-                "race_no": args.race_no,
-                "top_k": args.top_k,
-            },
+                "filters": {
+                    "venue": venue_filters,
+                    "race_no": race_no,
+                    "top_k": args.top_k,
+                },
             "recommendations": [recommendation.to_dict() for recommendation in recommendations],
             "race_predictions": race_predictions,
             "races": [prediction.to_dict() for prediction in predictions],
@@ -261,14 +349,64 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--max-workers", type=int, default=4, help="Parallel fetch workers.")
     collect.set_defaults(handler=_collect_handler)
 
+    import_db = subparsers.add_parser(
+        "import-db",
+        help="Import raw JSON race records into the SQLite history store.",
+    )
+    import_db.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
+    import_db.add_argument("--input-dir", default="data/raw")
+    import_db.add_argument("--db-path", default=None)
+    import_db.add_argument("--start-date", default=None)
+    import_db.add_argument("--end-date", default=None)
+    import_db.add_argument("--venue", action="append", help="Venue code or name.")
+    import_db.set_defaults(handler=_import_db_handler)
+
+    sync_db = subparsers.add_parser(
+        "sync-db",
+        help="Collect a lookback window of races and import them into the SQLite history store.",
+    )
+    sync_db.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
+    sync_db.add_argument("--output-dir", default="data/raw")
+    sync_db.add_argument("--db-path", default=None)
+    sync_db.add_argument("--race-date", default=None, help="Sync end date.")
+    sync_db.add_argument("--lookback-days", type=int, default=365)
+    sync_db.add_argument("--venue", action="append", help="Venue code or name.")
+    sync_db.add_argument("--race-no", type=int, default=None, help="Collect only one race number.")
+    sync_db.add_argument("--no-beforeinfo", action="store_true", help="Skip beforeinfo pages.")
+    sync_db.add_argument("--no-results", action="store_true", help="Skip result pages.")
+    sync_db.add_argument("--no-odds", action="store_true", help="Skip trifecta odds pages.")
+    sync_db.add_argument("--force", action="store_true", help="Refetch even when a complete record already exists.")
+    sync_db.add_argument("--request-timeout", type=float, default=20.0, help="HTTP timeout seconds per request.")
+    sync_db.add_argument("--request-max-retries", type=int, default=3, help="Retry count per request.")
+    sync_db.add_argument("--request-retry-backoff-seconds", type=float, default=1.0, help="Linear retry backoff seconds.")
+    sync_db.add_argument("--max-workers", type=int, default=4, help="Parallel fetch workers.")
+    sync_db.set_defaults(handler=_sync_db_handler)
+
+    sync_download_db = subparsers.add_parser(
+        "sync-download-db",
+        help="Backfill historical races from the official daily download files into raw JSON and SQLite.",
+    )
+    sync_download_db.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
+    sync_download_db.add_argument("--output-dir", default="data/raw")
+    sync_download_db.add_argument("--db-path", default=None)
+    sync_download_db.add_argument("--race-date", default=None, help="Sync end date.")
+    sync_download_db.add_argument("--lookback-days", type=int, default=365)
+    sync_download_db.add_argument("--request-timeout", type=float, default=30.0)
+    sync_download_db.add_argument("--max-workers", type=int, default=4)
+    sync_download_db.set_defaults(handler=_sync_download_db_handler)
+
     build_dataset_cmd = subparsers.add_parser(
         "build-dataset",
         help="Transform raw JSON race records into entrant-level training rows.",
     )
     build_dataset_cmd.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
     build_dataset_cmd.add_argument("--input-dir", default="data/raw")
+    build_dataset_cmd.add_argument("--input-db", default=None)
     build_dataset_cmd.add_argument("--output-dir", default="data/processed")
     build_dataset_cmd.add_argument("--dataset-path", default=None)
+    build_dataset_cmd.add_argument("--start-date", default=None)
+    build_dataset_cmd.add_argument("--end-date", default=None)
+    build_dataset_cmd.add_argument("--venue", action="append", help="Venue code or name.")
     build_dataset_cmd.set_defaults(handler=_build_dataset_handler)
 
     refresh_odds = subparsers.add_parser(
@@ -314,24 +452,15 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.set_defaults(handler=_backtest_handler)
 
     predict = subparsers.add_parser("predict", help="Generate race predictions.")
-    predict.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
-    predict.add_argument("--output-dir", default="artifacts/predictions")
-    predict.add_argument("--race-date", default=None)
-    predict.add_argument("--model-path", default=None, help="Optional trained model artifact path.")
-    predict.add_argument(
-        "--venue",
-        action="append",
-        help="Venue code or name. Repeat this option to target multiple venues.",
-    )
-    predict.add_argument("--race-no", type=int, default=None, help="Race number to predict.")
-    predict.add_argument("--top-k", type=int, default=5, help="Number of trifecta candidates to keep.")
-    predict.add_argument("--max-workers", type=int, default=4, help="Parallel fetch workers.")
-    predict.add_argument("--min-expected-value", type=float, default=None, help="Override recommendation EV threshold.")
-    predict.add_argument("--max-per-race", type=int, default=None, help="Override max recommendations per race.")
-    predict.add_argument("--candidate-pool-size", type=int, default=None, help="Override candidate trifecta pool size.")
-    predict.add_argument("--min-probability", type=float, default=None, help="Override minimum model probability.")
-    predict.add_argument("--min-edge", type=float, default=None, help="Override minimum market edge.")
+    _add_prediction_arguments(predict, require_venue=False, include_race_no=True)
     predict.set_defaults(handler=_predict_handler)
+
+    predict_venue = subparsers.add_parser(
+        "predict-venue",
+        help="Generate predictions for all 12 races at a specific venue.",
+    )
+    _add_prediction_arguments(predict_venue, require_venue=True, include_race_no=False)
+    predict_venue.set_defaults(handler=_predict_handler)
 
     note_morning = subparsers.add_parser("note-morning", help="Generate a morning note article from predictions.")
     note_morning.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
@@ -408,6 +537,8 @@ def _resolve_betting_policy(args: argparse.Namespace, config: dict, artifact: di
     policy.update(config.get("betting", {}))
     if artifact and artifact.get("betting_policy"):
         policy.update(artifact["betting_policy"])
+    if artifact and artifact.get("single_day_betting_policy"):
+        policy.update(artifact["single_day_betting_policy"])
     if args.min_expected_value is not None:
         policy["min_expected_value"] = args.min_expected_value
     if args.max_per_race is not None:
@@ -418,6 +549,10 @@ def _resolve_betting_policy(args: argparse.Namespace, config: dict, artifact: di
         policy["min_probability"] = args.min_probability
     if args.min_edge is not None:
         policy["min_edge"] = args.min_edge
+    if args.min_market_odds is not None:
+        policy["min_market_odds"] = args.min_market_odds
+    if args.max_market_odds is not None:
+        policy["max_market_odds"] = args.max_market_odds
     return policy
 
 
@@ -485,6 +620,14 @@ def _default_backtest_output_path(config: dict) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(tz=DEFAULT_TIMEZONE).strftime("%Y%m%dT%H%M%S")
     return output_dir / f"backtest_{timestamp}.json"
+
+
+def _default_history_db_path(config: dict) -> Path:
+    configured = config.get("paths", {}).get("history_db_path")
+    if configured:
+        return Path(configured)
+    external_dir = Path(config.get("paths", {}).get("external_dir", "data/external"))
+    return external_dir / "history.sqlite"
 
 
 def _format_prediction_summary(
@@ -604,3 +747,37 @@ def _race_prediction_payload(prediction: RacePrediction) -> dict:
 
 def _race_key(race_date: str, venue_code: str, race_no: int) -> str:
     return f"{compact_race_date(race_date)}_{str(venue_code).zfill(2)}_{int(race_no):02d}"
+
+
+def _add_prediction_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    require_venue: bool,
+    include_race_no: bool,
+) -> None:
+    parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
+    parser.add_argument("--output-dir", default="artifacts/predictions")
+    parser.add_argument("--race-date", default=None)
+    parser.add_argument("--model-path", default=None, help="Optional trained model artifact path.")
+    parser.add_argument(
+        "--venue",
+        action="append",
+        required=require_venue,
+        help="Venue code or name. Repeat this option to target multiple venues.",
+    )
+    if include_race_no:
+        parser.add_argument("--race-no", type=int, default=None, help="Race number to predict.")
+    parser.add_argument("--top-k", type=int, default=5, help="Number of trifecta candidates to keep.")
+    parser.add_argument("--max-workers", type=int, default=4, help="Parallel fetch workers.")
+    parser.add_argument("--min-expected-value", type=float, default=None, help="Override recommendation EV threshold.")
+    parser.add_argument("--max-per-race", type=int, default=None, help="Override max recommendations per race.")
+    parser.add_argument("--candidate-pool-size", type=int, default=None, help="Override candidate trifecta pool size.")
+    parser.add_argument("--min-probability", type=float, default=None, help="Override minimum model probability.")
+    parser.add_argument("--min-edge", type=float, default=None, help="Override minimum market edge.")
+    parser.add_argument("--min-market-odds", type=float, default=None, help="Override minimum market odds.")
+    parser.add_argument("--max-market-odds", type=float, default=None, help="Override maximum market odds.")
+
+
+def _parse_race_date(value: str) -> date:
+    normalized = restore_race_date(compact_race_date(value))
+    return datetime.fromisoformat(normalized).date()

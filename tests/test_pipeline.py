@@ -241,9 +241,12 @@ def test_build_dataset_and_train_model_end_to_end(tmp_path: Path):
     assert "min_expected_value" in training_result.betting_policy
     assert "min_probability" in training_result.betting_policy
     assert "min_edge" in training_result.betting_policy
+    assert "min_market_odds" in training_result.betting_policy
+    assert "max_market_odds" in training_result.betting_policy
 
     artifact = load_model_artifact(Path(training_result.model_path))
     assert "betting_policy" in artifact
+    assert "single_day_betting_policy" in artifact
     assert "payout_model" in artifact
     assert "calibration_summary" in artifact
     prediction = predict_race_with_model(
@@ -291,6 +294,32 @@ def test_generate_trifecta_recommendations_respects_candidate_pool_size():
     )
 
     assert recommendations == []
+
+
+def test_generate_trifecta_recommendations_respects_market_odds_band():
+    recommendations = generate_trifecta_recommendations(
+        race_key="2026-03-10_24_12",
+        venue_code="24",
+        venue_name="大村",
+        race_no=12,
+        lane_probabilities={1: 0.6, 2: 0.2, 3: 0.1, 4: 0.05, 5: 0.03, 6: 0.02},
+        payout_model=None,
+        odds_map={
+            "1-2-3": 90.0,
+            "1-3-2": 30.0,
+        },
+        policy={
+            "min_expected_value": 1.0,
+            "max_per_race": 2,
+            "candidate_pool_size": 2,
+            "min_probability": 0.0,
+            "min_edge": 0.0,
+            "min_market_odds": 70.0,
+            "max_market_odds": 120.0,
+        },
+    )
+
+    assert [item.combination for item in recommendations] == ["1-2-3"]
 
 
 def test_filter_rows_by_complete_groups_drops_partial_day():

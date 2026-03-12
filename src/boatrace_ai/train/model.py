@@ -21,6 +21,8 @@ from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
 from boatrace_ai.betting import (
     DEFAULT_BETTING_POLICY,
+    ROI_FOCUSED_BETTING_POLICY,
+    SINGLE_DAY_ROI_BETTING_POLICY,
     build_payout_model,
     evaluate_recommendation_strategy,
     iter_betting_policies,
@@ -36,10 +38,13 @@ from boatrace_ai.features.dataset import FEATURE_COLUMNS, rows_to_matrix
 DEFAULT_TIMEZONE = ZoneInfo("Asia/Tokyo")
 MAX_TRAINING_DATE_GAP_DAYS = 3
 MIN_WALK_FORWARD_TRAIN_RACES = 8
+MAX_CALIBRATION_DATES = 60
 CONSERVATIVE_SINGLE_DAY_POLICY = {
     **DEFAULT_BETTING_POLICY,
     "candidate_pool_size": 1,
     "min_probability": 0.3,
+    "min_market_odds": 70.0,
+    "max_market_odds": 120.0,
 }
 
 
@@ -154,6 +159,7 @@ def train_win_model(
             "metrics": metrics,
             "payout_model": payout_model,
             "betting_policy": betting_policy,
+            "single_day_betting_policy": dict(SINGLE_DAY_ROI_BETTING_POLICY),
             "calibrator": calibrator,
             "calibration_summary": calibration_summary,
             "raw_dir": str(raw_dir) if raw_dir else None,
@@ -344,6 +350,8 @@ def _evaluate_predictions(
             "betting_candidate_pool_size": betting_policy.get("candidate_pool_size"),
             "betting_min_probability": betting_policy.get("min_probability"),
             "betting_min_edge": betting_policy.get("min_edge"),
+            "betting_min_market_odds": betting_policy.get("min_market_odds"),
+            "betting_max_market_odds": betting_policy.get("max_market_odds"),
         }
     )
     return metrics
@@ -383,10 +391,12 @@ def _derive_betting_policy(
     )
     if walk_forward_policy:
         return walk_forward_policy
+    if len(unique_dates) >= 3:
+        return dict(ROI_FOCUSED_BETTING_POLICY)
 
     fit_rows, validation_rows = _split_rows_for_policy_selection(train_rows)
     if not fit_rows or not validation_rows:
-        return dict(DEFAULT_BETTING_POLICY)
+        return dict(ROI_FOCUSED_BETTING_POLICY)
 
     x_fit = np.array(rows_to_matrix(fit_rows, FEATURE_COLUMNS), dtype=float)
     y_fit = np.array([int(row["is_win"]) for row in fit_rows], dtype=int)
@@ -413,23 +423,29 @@ def _select_betting_policy_walk_forward(
     if len(unique_dates) < 3:
         return None
 
+    fold_contexts = _prepare_walk_forward_contexts(
+        rows,
+        odds_index=odds_index,
+        random_state=random_state,
+        dates=unique_dates,
+    )
+    if not fold_contexts:
+        return None
+
     best_policy: dict[str, Any] | None = None
     best_score = (-math.inf,)
 
     for policy in iter_betting_policies():
-        summary = _walk_forward_backtest(
-            rows,
-            odds_index=odds_index,
-            random_state=random_state,
-            policy=policy,
-            dates=unique_dates,
-        )
+        summary = _summarize_walk_forward_contexts(fold_contexts, policy)
         if not summary or summary.get("bets", 0) == 0 or summary.get("roi") is None:
             continue
         score = score_betting_summary(summary)
         if score > best_score:
             best_score = score
             best_policy = policy
+
+    if best_policy is None or best_score[2] <= 0:
+        return None
 
     return best_policy
 
@@ -469,11 +485,27 @@ def _walk_forward_backtest(
     policy: dict[str, Any],
     dates: list[str] | None = None,
 ) -> dict[str, Any] | None:
+    fold_contexts = _prepare_walk_forward_contexts(
+        rows,
+        odds_index=odds_index,
+        random_state=random_state,
+        dates=dates,
+    )
+    return _summarize_walk_forward_contexts(fold_contexts, policy)
+
+
+def _prepare_walk_forward_contexts(
+    rows: list[dict[str, Any]],
+    *,
+    odds_index: dict[str, dict[str, float]],
+    random_state: int,
+    dates: list[str] | None = None,
+) -> list[dict[str, Any]]:
     unique_dates = dates or sorted({row["date"] for row in rows})
     if len(unique_dates) < 2:
-        return None
+        return []
 
-    fold_summaries: list[dict[str, Any]] = []
+    fold_contexts: list[dict[str, Any]] = []
     for test_date in unique_dates[1:]:
         fit_rows = [row for row in rows if row["date"] < test_date]
         validation_rows = [row for row in rows if row["date"] == test_date]
@@ -491,9 +523,32 @@ def _walk_forward_backtest(
             validation_probabilities,
             odds_index=odds_index,
         )
-        payout_model = build_payout_model(fit_rows)
-        summary = evaluate_recommendation_strategy(validation_races, payout_model, policy)
-        summary["fold_date"] = test_date
+        fold_contexts.append(
+            {
+                "fold_date": test_date,
+                "validation_races": validation_races,
+                "payout_model": build_payout_model(fit_rows),
+            }
+        )
+
+    return fold_contexts
+
+
+def _summarize_walk_forward_contexts(
+    fold_contexts: list[dict[str, Any]],
+    policy: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not fold_contexts:
+        return None
+
+    fold_summaries: list[dict[str, Any]] = []
+    for fold_context in fold_contexts:
+        summary = evaluate_recommendation_strategy(
+            fold_context["validation_races"],
+            fold_context["payout_model"],
+            policy,
+        )
+        summary["fold_date"] = fold_context["fold_date"]
         fold_summaries.append(summary)
 
     if not fold_summaries:
@@ -567,11 +622,12 @@ def _fit_probability_calibrator_from_rows(
             "dates": [],
         }
 
+    calibration_dates = _select_calibration_dates(unique_dates)
     raw_probabilities: list[float] = []
     labels: list[int] = []
     dates: list[str] = []
 
-    for calibration_date in unique_dates[1:]:
+    for calibration_date in calibration_dates:
         fit_rows = [row for row in rows if row["date"] < calibration_date]
         calibration_rows = [row for row in rows if row["date"] == calibration_date]
         fit_race_count = len({row["race_key"] for row in fit_rows})
@@ -593,6 +649,13 @@ def _fit_probability_calibrator_from_rows(
     )
     summary["dates"] = dates
     return calibrator, summary
+
+
+def _select_calibration_dates(unique_dates: list[str]) -> list[str]:
+    candidate_dates = unique_dates[1:]
+    if len(candidate_dates) <= MAX_CALIBRATION_DATES:
+        return candidate_dates
+    return candidate_dates[-MAX_CALIBRATION_DATES:]
 
 
 def _prefix_calibration_summary(summary: dict[str, Any]) -> dict[str, Any]:

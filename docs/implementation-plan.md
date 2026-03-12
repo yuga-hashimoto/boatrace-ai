@@ -14,22 +14,24 @@
 | 領域 | 現在の状態 |
 | --- | --- |
 | 公式データ収集 | 公式HTMLから `race index` `racelist` `beforeinfo` `raceresult` `odds3t` を収集済み |
+| 公式ダウンロード | 日次 `B` / `K` LZH を取得して raw JSON / SQLite に展開済み |
 | 履歴保存 | 1レース1JSONで `data/raw/YYYYMMDD/` に保存済み |
+| 履歴DB | SQLite に `1レース1行` で保存し、過去1年分を蓄積しやすい形に移行済み |
 | データセット生成 | entrant単位CSVを `data/processed/entrants.csv` に生成済み |
 | 学習 | `HistGradientBoostingClassifier` による勝率モデルを実装済み |
 | 推奨ロジック | 3連単候補を確率とオッズから評価し、ROI基準で推薦済み |
 | 評価 | holdout と walk-forward のROI指標を実装済み |
 | 資金管理評価 | flat / Kelly の bankroll シミュレーションを backtest CLI で実装済み |
-| 配信 | CLI と予測JSON、note向けHTML生成まで実装済み |
+| 配信 | CLI と予測JSON、venue全12R予測、note向けHTML生成まで実装済み |
 | テスト | parser、dataset、train、history、note の自動テストあり |
 
 ## 3. 計画文書からの修正点
 
 以下は、そのまま実装済みとして扱うと誤解になるため、方針として取り込む項目です。
 
-- 公式LZHダウンロード基盤は未実装です。
-  現在は公式HTML収集が本線です。LZH一括取得は次段階の履歴拡張として扱います。
-- REST API、GraphQL、Web UI、DB、S3、Airflow、監視基盤、CI/CD は未実装です。
+- 公式ダウンロードは一部実装です。
+  現在は日次 `B` / `K` の取り込みまで実装済みで、期別成績など他アセットの自動投入は未実装です。
+- REST API、GraphQL、Web UI、S3、Airflow、監視基盤、CI/CD は未実装です。
   これらは「目標アーキテクチャ」であり、現状成果物ではありません。
 - 3連単確率は直接学習していません。
   現在は艇ごとの勝率からPlackett-Luce型で3連単候補を導出しています。
@@ -46,6 +48,8 @@
 
 - `data/raw/`
   公式HTMLや外部ソースの生データを保存する一次保管領域。
+- `data/external/history.sqlite`
+  過去1年分以上の履歴を query しやすく保つ SQLite ストア。
 - `data/processed/`
   学習・評価に使うテーブル化済みデータ。
 - 将来拡張:
@@ -70,7 +74,7 @@
 | ソース | データ | 用途 | 優先度 | 現在の状態 |
 | --- | --- | --- | --- | --- |
 | BOAT RACE公式HTML | 出走表、直前情報、結果、3連単オッズ | 当日予測、履歴収集 | 最優先 | 実装済み |
-| BOAT RACE公式ダウンロード | 競走成績、番組表、期別成績 | 長期履歴の一括投入 | 高 | 未実装 |
+| BOAT RACE公式ダウンロード | 日次番組表 `B`、日次成績 `K`、期別成績など | 長期履歴の一括投入 | 高 | `B` / `K` は実装済み、他は未実装 |
 | 各場モーター情報 | モーター履歴、交換情報 | 特徴量強化 | 高 | 未実装 |
 | 気象庁データ | 風、気温、気圧、降水、潮位 | 環境特徴量 | 中 | 未実装 |
 | 払戻・オッズ履歴 | 市場情報、期待値検証 | ROI最適化 | 最優先 | 部分実装 |
@@ -159,10 +163,13 @@
 ### Phase 0: 現在地
 
 - 公式HTML収集
+- 公式日次 `B` / `K` ダウンロード取り込み
+- SQLite履歴DB
 - 学習済みモデル保存
 - holdout / walk-forward 検証
 - bankroll backtest
 - CLI予測
+- venue全レース一括予測
 - note生成
 
 ### Phase 1: MVP強化
@@ -194,7 +201,8 @@
 
 | 優先度 | タスク | 完了条件 |
 | --- | --- | --- |
-| P0 | 公式ダウンロード取り込み | LZH/CSVを自動展開して raw/import に格納できる |
+| P0 | 公式ダウンロード拡張 | `B` / `K` 以外の LZH/CSV も自動展開して raw/import に格納できる |
+| P0 | 1年履歴DBの定期同期 | `sync-db` を定期実行し、過去365日が常に SQLite に揃う |
 | P0 | 長期履歴再学習 | 5年以上の履歴で学習と時系列検証が回る |
 | P0 | 直近成績特徴 | 直近N走と節間特徴が dataset に入る |
 | P0 | 校正 | 完了。OOF Platt calibration と比較指標を artifact / backtest に保持 |
