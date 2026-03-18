@@ -13,8 +13,12 @@ from boatrace_ai.collect.official import (
     parse_race_result,
 )
 from boatrace_ai.betting import (
+    LOSS_AVOIDANCE_BETTING_POLICY,
     compare_bankroll_strategies,
+    evaluate_recommendation_strategy,
     generate_trifecta_recommendations,
+    policy_summary_is_active_enough,
+    select_betting_policy,
     simulate_bankroll_strategy,
 )
 from boatrace_ai.calibration import apply_probability_calibration
@@ -24,6 +28,9 @@ from boatrace_ai.predict.model import predict_race_with_model
 from boatrace_ai.train.model import (
     _filter_rows_by_complete_groups,
     _load_race_odds_index,
+    _select_long_window_monthly_policy,
+    _select_betting_policy_walk_forward,
+    _select_policy_training_rows,
     _select_recent_training_rows,
     load_model_artifact,
     train_win_model,
@@ -272,6 +279,20 @@ def test_select_recent_training_rows_skips_stale_gap():
     assert {row["date"] for row in selected} == {"2026-03-08", "2026-03-09"}
 
 
+def test_select_recent_training_rows_limits_to_latest_dates():
+    selected = _select_recent_training_rows(
+        [
+            {"date": "2026-03-08", "race_key": "2026-03-08_24_01"},
+            {"date": "2026-03-09", "race_key": "2026-03-09_24_01"},
+            {"date": "2026-03-10", "race_key": "2026-03-10_24_01"},
+            {"date": "2026-03-11", "race_key": "2026-03-11_24_01"},
+        ],
+        max_dates=2,
+    )
+
+    assert {row["date"] for row in selected} == {"2026-03-10", "2026-03-11"}
+
+
 def test_generate_trifecta_recommendations_respects_candidate_pool_size():
     recommendations = generate_trifecta_recommendations(
         race_key="2026-03-10_24_12",
@@ -320,6 +341,240 @@ def test_generate_trifecta_recommendations_respects_market_odds_band():
     )
 
     assert [item.combination for item in recommendations] == ["1-2-3"]
+
+
+def test_generate_trifecta_recommendations_respects_required_second_lane():
+    recommendations = generate_trifecta_recommendations(
+        race_key="2026-03-10_24_12",
+        venue_code="24",
+        venue_name="大村",
+        race_no=12,
+        lane_probabilities={1: 0.55, 2: 0.22, 3: 0.11, 4: 0.06, 5: 0.04, 6: 0.02},
+        payout_model=None,
+        odds_map={
+            "1-2-3": 30.0,
+            "1-3-2": 30.0,
+            "2-1-3": 35.0,
+        },
+        policy={
+            "min_expected_value": 1.0,
+            "max_per_race": 2,
+            "candidate_pool_size": 3,
+            "min_probability": 0.0,
+            "min_edge": 0.0,
+            "required_second_lane": 2,
+        },
+    )
+
+    assert [item.combination for item in recommendations] == ["1-2-3"]
+
+
+def test_generate_trifecta_recommendations_respects_min_win_margin():
+    recommendations = generate_trifecta_recommendations(
+        race_key="2026-03-10_24_12",
+        venue_code="24",
+        venue_name="大村",
+        race_no=12,
+        lane_probabilities={1: 0.34, 2: 0.31, 3: 0.15, 4: 0.10, 5: 0.06, 6: 0.04},
+        payout_model=None,
+        odds_map={
+            "1-2-3": 30.0,
+        },
+        policy={
+            "min_expected_value": 1.0,
+            "max_per_race": 1,
+            "candidate_pool_size": 1,
+            "min_probability": 0.0,
+            "min_edge": 0.0,
+            "min_win_margin": 0.05,
+        },
+    )
+
+    assert recommendations == []
+
+
+def test_generate_trifecta_recommendations_uses_fallback_policy_when_primary_has_no_bet():
+    recommendations = generate_trifecta_recommendations(
+        race_key="2026-03-10_24_12",
+        venue_code="24",
+        venue_name="大村",
+        race_no=12,
+        lane_probabilities={1: 0.8, 2: 0.15, 3: 0.03, 4: 0.01, 5: 0.005, 6: 0.005},
+        payout_model=None,
+        odds_map={
+            "1-2-3": 80.0,
+        },
+        policy={
+            "min_expected_value": 1.0,
+            "max_per_race": 1,
+            "candidate_pool_size": 12,
+            "min_probability": 0.18,
+            "min_edge": 0.0,
+            "min_market_odds": 90.0,
+            "max_market_odds": 120.0,
+            "fallback_policy": {
+                "min_expected_value": 24.0,
+                "max_per_race": 1,
+                "candidate_pool_size": 1,
+                "min_probability": 0.25,
+                "min_edge": 0.0,
+                "min_market_odds": 50.0,
+                "max_market_odds": 120.0,
+            },
+        },
+    )
+
+    assert [item.combination for item in recommendations] == ["1-2-3"]
+
+
+def test_policy_summary_is_active_enough_requires_multiple_bets_and_days():
+    assert not policy_summary_is_active_enough({"bets": 1, "betting_days": 1, "days": 2})
+    assert not policy_summary_is_active_enough({"bets": 2, "betting_days": 1, "days": 3})
+    assert policy_summary_is_active_enough({"bets": 2, "betting_days": 2, "days": 3})
+    assert policy_summary_is_active_enough({"bets": 2, "betting_days": 1, "days": 1})
+
+
+def test_select_betting_policy_prefers_active_policy_when_available():
+    validation_races = [
+        {
+            "race_key": "2026-03-14_24_01",
+            "date": "2026-03-14",
+            "venue_code": "24",
+            "venue_name": "大村",
+            "race_no": 1,
+            "lane_probabilities": {1: 0.70, 2: 0.20, 3: 0.05, 4: 0.02, 5: 0.02, 6: 0.01},
+            "odds_map": {"1-2-3": 10.0},
+            "actual_trifecta_key": "2-1-3",
+            "actual_trifecta_payout_yen": 3000,
+        },
+        {
+            "race_key": "2026-03-15_24_01",
+            "date": "2026-03-15",
+            "venue_code": "24",
+            "venue_name": "大村",
+            "race_no": 1,
+            "lane_probabilities": {1: 0.80, 2: 0.15, 3: 0.03, 4: 0.01, 5: 0.005, 6: 0.005},
+            "odds_map": {"1-2-3": 10.0},
+            "actual_trifecta_key": "1-2-3",
+            "actual_trifecta_payout_yen": 5000,
+        },
+    ]
+
+    selected_policy = select_betting_policy(validation_races, payout_model=None)
+    selected_summary = evaluate_recommendation_strategy(
+        validation_races,
+        payout_model=None,
+        policy=selected_policy,
+    )
+
+    assert selected_summary["bets"] >= 2
+    assert selected_summary["betting_days"] == 2
+    assert selected_policy["min_probability"] <= 0.2
+
+
+def test_select_betting_policy_uses_loss_avoidance_when_all_candidates_lose():
+    validation_races = [
+        {
+            "race_key": "2026-03-16_24_01",
+            "date": "2026-03-16",
+            "venue_code": "24",
+            "venue_name": "大村",
+            "race_no": 1,
+            "lane_probabilities": {1: 0.7, 2: 0.15, 3: 0.08, 4: 0.04, 5: 0.02, 6: 0.01},
+            "odds_map": {"1-2-3": 25.0},
+            "actual_trifecta_key": "3-2-1",
+            "actual_trifecta_payout_yen": 8000,
+        }
+    ]
+
+    assert select_betting_policy(validation_races, payout_model=None) == LOSS_AVOIDANCE_BETTING_POLICY
+
+
+def test_select_betting_policy_walk_forward_can_choose_positive_venue_subset(monkeypatch):
+    base_policy = {
+        "min_expected_value": 1.0,
+        "max_per_race": 1,
+        "candidate_pool_size": 1,
+        "min_probability": 0.0,
+        "min_edge": 0.0,
+        "min_market_odds": 0.0,
+        "max_market_odds": None,
+    }
+    rows = [
+        {"date": "2026-03-10", "race_key": "2026-03-10_20_01"},
+        {"date": "2026-03-11", "race_key": "2026-03-11_20_01"},
+        {"date": "2026-03-12", "race_key": "2026-03-12_20_01"},
+    ]
+    fold_contexts = [
+        {
+            "fold_date": "2026-03-11",
+            "payout_model": None,
+            "validation_races": [
+                {
+                    "race_key": "2026-03-11_20_01",
+                    "date": "2026-03-11",
+                    "venue_code": "20",
+                    "venue_name": "若松",
+                    "race_no": 1,
+                    "lane_probabilities": {1: 0.70, 2: 0.20, 3: 0.05, 4: 0.03, 5: 0.01, 6: 0.01},
+                    "odds_map": {"1-2-3": 10.0},
+                    "actual_trifecta_key": "1-2-3",
+                    "actual_trifecta_payout_yen": 180,
+                },
+                {
+                    "race_key": "2026-03-11_24_01",
+                    "date": "2026-03-11",
+                    "venue_code": "24",
+                    "venue_name": "大村",
+                    "race_no": 1,
+                    "lane_probabilities": {1: 0.70, 2: 0.20, 3: 0.05, 4: 0.03, 5: 0.01, 6: 0.01},
+                    "odds_map": {"1-2-3": 10.0},
+                    "actual_trifecta_key": "2-1-3",
+                    "actual_trifecta_payout_yen": 5000,
+                },
+            ],
+        },
+        {
+            "fold_date": "2026-03-12",
+            "payout_model": None,
+            "validation_races": [
+                {
+                    "race_key": "2026-03-12_20_01",
+                    "date": "2026-03-12",
+                    "venue_code": "20",
+                    "venue_name": "若松",
+                    "race_no": 1,
+                    "lane_probabilities": {1: 0.70, 2: 0.20, 3: 0.05, 4: 0.03, 5: 0.01, 6: 0.01},
+                    "odds_map": {"1-2-3": 10.0},
+                    "actual_trifecta_key": "1-2-3",
+                    "actual_trifecta_payout_yen": 180,
+                },
+                {
+                    "race_key": "2026-03-12_24_01",
+                    "date": "2026-03-12",
+                    "venue_code": "24",
+                    "venue_name": "大村",
+                    "race_no": 1,
+                    "lane_probabilities": {1: 0.70, 2: 0.20, 3: 0.05, 4: 0.03, 5: 0.01, 6: 0.01},
+                    "odds_map": {"1-2-3": 10.0},
+                    "actual_trifecta_key": "2-1-3",
+                    "actual_trifecta_payout_yen": 5000,
+                },
+            ],
+        },
+    ]
+
+    monkeypatch.setattr("boatrace_ai.train.model.iter_betting_policies", lambda: [base_policy])
+
+    selected = _select_betting_policy_walk_forward(
+        rows,
+        odds_index={},
+        random_state=7,
+        fold_contexts=fold_contexts,
+    )
+
+    assert selected is not None
+    assert selected["allowed_venues"] == ["20"]
 
 
 def test_filter_rows_by_complete_groups_drops_partial_day():
@@ -395,6 +650,158 @@ def test_run_holdout_backtest_returns_bankroll_summaries(tmp_path: Path):
     assert result.bankroll["kelly"]["max_drawdown_rate"] >= 0.0
     assert "calibration_method" in result.metrics
     assert "calibration_oof_brier_score" in result.metrics
+
+
+def test_run_holdout_backtest_skips_policy_derivation_with_explicit_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import boatrace_ai.evaluate.backtest as backtest_module
+
+    raw_dir = tmp_path / "raw"
+    processed_dir = tmp_path / "processed"
+
+    dates = ["2026-03-08", "2026-03-09", "2026-03-10"]
+    race_counter = 1
+    for race_date in dates:
+        date_dir = raw_dir / race_date.replace("-", "")
+        date_dir.mkdir(parents=True, exist_ok=True)
+        for _ in range(4):
+            winner_lane = 1 if race_counter % 2 else 3
+            record = _make_raw_record(race_date, race_counter, winner_lane)
+            (date_dir / f"24_{race_counter:02d}.json").write_text(
+                json.dumps(record, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            race_counter += 1
+
+    dataset_path = processed_dir / "entrants.csv"
+    build_dataset(raw_dir, dataset_path)
+
+    def _fail_derivation(*args, **kwargs):
+        raise AssertionError("policy derivation should be skipped")
+
+    monkeypatch.setattr(backtest_module, "_derive_betting_policy", _fail_derivation)
+
+    result = backtest_module.run_holdout_backtest(
+        dataset_path=dataset_path,
+        raw_dir=raw_dir,
+        train_end_date="2026-03-09",
+        random_state=7,
+        bankroll_mode="flat",
+        betting_policy_override={
+            "min_expected_value": 0.0,
+            "max_per_race": 1,
+            "candidate_pool_size": 12,
+            "min_probability": 0.0,
+            "min_edge": 0.0,
+            "min_market_odds": 0.0,
+            "required_first_lane": 1,
+            "required_second_lane": 3,
+            "required_third_lane": 2,
+        },
+        clear_derived_filters=True,
+    )
+
+    assert result.betting_policy["required_first_lane"] == 1
+    assert result.betting_policy["required_second_lane"] == 3
+    assert result.betting_policy["required_third_lane"] == 2
+    assert result.metrics["recommendation_bets"] >= 1
+
+
+def test_select_long_window_monthly_policy_prefers_monthly_roi():
+    fold_contexts = [
+        {
+            "fold_date": "2026-03-01",
+            "validation_races": [
+                {
+                    "race_key": "2026-03-01_24_01",
+                    "date": "2026-03-01",
+                    "venue_code": "24",
+                    "venue_name": "大村",
+                    "race_no": 1,
+                    "lane_probabilities": {1: 0.35, 2: 0.18, 3: 0.12, 4: 0.16, 5: 0.1, 6: 0.09},
+                    "trifecta_probability_map": {"1-4-6": 0.12, "1-2-3": 0.08},
+                    "odds_map": {"1-4-6": 20.0, "1-2-3": 12.0},
+                    "actual_trifecta_key": "1-4-6",
+                    "actual_trifecta_payout_yen": 4000,
+                }
+            ],
+            "payout_model": None,
+        },
+        {
+            "fold_date": "2026-03-02",
+            "validation_races": [
+                {
+                    "race_key": "2026-03-02_24_01",
+                    "date": "2026-03-02",
+                    "venue_code": "24",
+                    "venue_name": "大村",
+                    "race_no": 1,
+                    "lane_probabilities": {1: 0.34, 2: 0.19, 3: 0.11, 4: 0.17, 5: 0.1, 6: 0.09},
+                    "trifecta_probability_map": {"1-4-6": 0.11, "1-2-3": 0.09},
+                    "odds_map": {"1-4-6": 22.0, "1-2-3": 12.0},
+                    "actual_trifecta_key": "1-4-6",
+                    "actual_trifecta_payout_yen": 4200,
+                }
+            ],
+            "payout_model": None,
+        },
+    ]
+
+    override = _select_long_window_monthly_policy(
+        unique_dates=[f"2026-02-{day:02d}" for day in range(1, 21)],
+        fold_contexts=fold_contexts,
+        selected_policy=LOSS_AVOIDANCE_BETTING_POLICY,
+    )
+
+    assert override is not None
+    assert override["required_first_lane"] == 1
+    assert override["required_second_lane"] == 4
+    assert override["required_third_lane"] == 6
+
+
+def test_select_policy_training_rows_uses_full_history_for_long_holdout():
+    train_rows = [
+        {"date": f"2026-02-{day:02d}", "race_key": f"train_{day}"}
+        for day in range(1, 26)
+    ]
+    evaluation_rows = [
+        {"date": f"2026-03-{day:02d}", "race_key": f"test_{day}"}
+        for day in range(1, 21)
+    ]
+
+    selected = _select_policy_training_rows(
+        train_rows,
+        evaluation_rows=evaluation_rows,
+        max_dates=4,
+    )
+
+    assert selected == train_rows
+
+
+def test_select_policy_training_rows_keeps_recent_block_for_short_holdout():
+    train_rows = [
+        {"date": f"2026-02-{day:02d}", "race_key": f"train_{day}"}
+        for day in range(1, 11)
+    ]
+    evaluation_rows = [
+        {"date": f"2026-03-{day:02d}", "race_key": f"test_{day}"}
+        for day in range(1, 4)
+    ]
+
+    selected = _select_policy_training_rows(
+        train_rows,
+        evaluation_rows=evaluation_rows,
+        max_dates=4,
+    )
+
+    assert sorted({row["date"] for row in selected}) == [
+        "2026-02-07",
+        "2026-02-08",
+        "2026-02-09",
+        "2026-02-10",
+    ]
 
 
 def test_train_model_raises_when_roi_guard_fails(tmp_path: Path):

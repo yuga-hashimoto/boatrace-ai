@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from time import sleep
 from typing import Any
 import unicodedata
 from urllib import error as urllib_error
@@ -17,6 +18,7 @@ from urllib import request as urllib_request
 from zoneinfo import ZoneInfo
 
 from boatrace_ai.collect.history import load_race_record, write_race_record
+from boatrace_ai.collect.official import RaceCard, RaceEntrant
 from boatrace_ai.store.sqlite import upsert_race_record
 
 
@@ -207,6 +209,46 @@ def fetch_race_records_from_official_download(race_date: str, request_timeout: f
             records.append(record)
 
     return records
+
+
+def fetch_program_cards_from_official_download(
+    race_date: str,
+    request_timeout: float = 30.0,
+    cache_path: Path | None = None,
+) -> list[RaceCard]:
+    program_text = _download_archive_text(race_date, kind="B", request_timeout=request_timeout)
+    if not program_text:
+        return _load_program_cards_cache(cache_path) if cache_path else []
+
+    records = parse_program_text(program_text)
+    cards = [
+        program_record_to_race_card(race_date, record)
+        for _, record in sorted(
+            records.items(),
+            key=lambda item: (
+                str(item[1].get("card", {}).get("venue_code") or ""),
+                int(item[1].get("race_no") or 0),
+            ),
+        )
+        if record.get("card")
+    ]
+    if cache_path:
+        _write_program_cards_cache(cache_path, cards)
+    return cards
+
+
+def program_record_to_race_card(race_date: str, record: dict[str, Any]) -> RaceCard:
+    card = record.get("card") or {}
+    entrants = [_program_entrant_to_race_entrant(entrant) for entrant in card.get("entrants", [])]
+    return RaceCard(
+        date=race_date,
+        venue_code=str(card.get("venue_code") or "").zfill(2),
+        venue_name=card.get("venue_name") or "",
+        race_no=int(card.get("race_no") or 0),
+        meeting_name=card.get("meeting_name") or "",
+        deadline=card.get("deadline"),
+        entrants=entrants,
+    )
 
 
 def parse_program_text(text: str) -> dict[tuple[str, int], dict[str, Any]]:
@@ -436,6 +478,92 @@ def _program_entrant_from_match(match: re.Match[str]) -> dict[str, Any]:
     }
 
 
+def _program_entrant_to_race_entrant(entrant: dict[str, Any]) -> RaceEntrant:
+    return RaceEntrant(
+        lane=int(entrant.get("lane") or 0),
+        racer_id=str(entrant.get("racer_id") or ""),
+        grade=entrant.get("grade") or "",
+        name=entrant.get("name") or "",
+        branch=entrant.get("branch"),
+        hometown=entrant.get("prefecture"),
+        age=entrant.get("age"),
+        weight_kg=entrant.get("weight_kg"),
+        f_count=int(entrant.get("f_count") or 0),
+        l_count=int(entrant.get("l_count") or 0),
+        average_start_timing=entrant.get("average_start_timing"),
+        national_win_rate=entrant.get("national_win_rate"),
+        national_2ren_rate=entrant.get("national_2ren_rate"),
+        national_3ren_rate=entrant.get("national_3ren_rate"),
+        local_win_rate=entrant.get("local_win_rate"),
+        local_2ren_rate=entrant.get("local_2ren_rate"),
+        local_3ren_rate=entrant.get("local_3ren_rate"),
+        motor_no=entrant.get("motor_no"),
+        motor_2ren_rate=entrant.get("motor_2ren_rate"),
+        motor_3ren_rate=entrant.get("motor_3ren_rate"),
+        boat_no=entrant.get("boat_no"),
+        boat_2ren_rate=entrant.get("boat_2ren_rate"),
+        boat_3ren_rate=entrant.get("boat_3ren_rate"),
+        recent_starts=list(entrant.get("recent_starts") or []),
+        recent_finishes=list(entrant.get("recent_finishes") or []),
+    )
+
+
+def _write_program_cards_cache(path: Path, cards: list[RaceCard]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = [card.to_dict() for card in cards]
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_program_cards_cache(path: Path | None) -> list[RaceCard]:
+    if path is None or not path.exists():
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    cards: list[RaceCard] = []
+    for card in payload:
+        entrants = [
+            RaceEntrant(
+                lane=int(entrant.get("lane") or 0),
+                racer_id=str(entrant.get("racer_id") or ""),
+                grade=entrant.get("grade") or "",
+                name=entrant.get("name") or "",
+                branch=entrant.get("branch"),
+                hometown=entrant.get("hometown"),
+                age=entrant.get("age"),
+                weight_kg=entrant.get("weight_kg"),
+                f_count=int(entrant.get("f_count") or 0),
+                l_count=int(entrant.get("l_count") or 0),
+                average_start_timing=entrant.get("average_start_timing"),
+                national_win_rate=entrant.get("national_win_rate"),
+                national_2ren_rate=entrant.get("national_2ren_rate"),
+                national_3ren_rate=entrant.get("national_3ren_rate"),
+                local_win_rate=entrant.get("local_win_rate"),
+                local_2ren_rate=entrant.get("local_2ren_rate"),
+                local_3ren_rate=entrant.get("local_3ren_rate"),
+                motor_no=entrant.get("motor_no"),
+                motor_2ren_rate=entrant.get("motor_2ren_rate"),
+                motor_3ren_rate=entrant.get("motor_3ren_rate"),
+                boat_no=entrant.get("boat_no"),
+                boat_2ren_rate=entrant.get("boat_2ren_rate"),
+                boat_3ren_rate=entrant.get("boat_3ren_rate"),
+                recent_starts=list(entrant.get("recent_starts") or []),
+                recent_finishes=list(entrant.get("recent_finishes") or []),
+            )
+            for entrant in card.get("entrants", [])
+        ]
+        cards.append(
+            RaceCard(
+                date=card.get("date") or "",
+                venue_code=str(card.get("venue_code") or "").zfill(2),
+                venue_name=card.get("venue_name") or "",
+                race_no=int(card.get("race_no") or 0),
+                meeting_name=card.get("meeting_name") or "",
+                deadline=card.get("deadline"),
+                entrants=entrants,
+            )
+        )
+    return cards
+
+
 def _result_entrant_from_match(match: re.Match[str]) -> dict[str, Any]:
     group = match.groupdict()
     finish_label = group["finish_label"]
@@ -496,22 +624,33 @@ def _download_archive_text(race_date: str, *, kind: str, request_timeout: float)
     kind_dir = kind.upper()
     file_prefix = kind.lower()
     url = f"{DOWNLOAD_BASE_URL}/{kind_dir}/{year_month}/{file_prefix}{yy_mm_dd}.lzh"
-    try:
-        with urllib_request.urlopen(url, timeout=request_timeout) as response:
-            archive_bytes = response.read()
-    except urllib_error.HTTPError:
-        return None
-    except urllib_error.URLError:
+    archive_bytes: bytes | None = None
+    for attempt in range(1, 4):
+        try:
+            with urllib_request.urlopen(url, timeout=request_timeout) as response:
+                archive_bytes = response.read()
+            break
+        except urllib_error.HTTPError:
+            return None
+        except (urllib_error.URLError, TimeoutError, OSError):
+            if attempt == 3:
+                return None
+            sleep(float(attempt))
+
+    if not archive_bytes:
         return None
 
     with tempfile.NamedTemporaryFile(suffix=".lzh") as archive_file:
         archive_file.write(archive_bytes)
         archive_file.flush()
-        extracted = subprocess.run(
-            ["bsdtar", "-xOf", archive_file.name],
-            check=True,
-            capture_output=True,
-        )
+        try:
+            extracted = subprocess.run(
+                ["bsdtar", "-xOf", archive_file.name],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            return None
     return extracted.stdout.decode("cp932", errors="ignore")
 
 

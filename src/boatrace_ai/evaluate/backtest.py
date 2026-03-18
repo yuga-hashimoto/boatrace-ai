@@ -10,26 +10,32 @@ import numpy as np
 
 from boatrace_ai.betting import (
     BET_UNIT_YEN,
-    SINGLE_DAY_ROI_BETTING_POLICY,
     build_payout_model,
     compare_bankroll_strategies,
-    evaluate_recommendation_strategy,
+    merge_betting_policy,
 )
 from boatrace_ai.calibration import apply_probability_calibration
 from boatrace_ai.features.dataset import FEATURE_COLUMNS, rows_to_matrix
 from boatrace_ai.train.model import (
+    MAX_POLICY_SELECTION_DATES,
     _build_race_probability_records,
     _derive_betting_policy,
     _evaluate_predictions,
     _filter_rows_by_complete_groups,
+    _fit_exacta_model,
     _fit_model,
     _load_complete_group_keys,
     _load_dataset_rows,
     _load_race_odds_index,
     _prefix_calibration_summary,
     _fit_probability_calibrator_from_rows,
-    _select_recent_training_rows,
+    _select_policy_training_rows,
     _split_rows_by_date,
+)
+from boatrace_ai.trifecta import (
+    EXACTA_FEATURE_COLUMNS,
+    attach_win_probability_features,
+    predict_staged_trifecta_probability_maps,
 )
 
 
@@ -66,6 +72,8 @@ def run_holdout_backtest(
     max_race_exposure_fraction: float | None = None,
     daily_stop_loss_yen: int | None = None,
     daily_take_profit_yen: int | None = None,
+    betting_policy_override: dict[str, Any] | None = None,
+    clear_derived_filters: bool = False,
 ) -> BacktestResult:
     rows = _load_dataset_rows(dataset_path)
     labeled_rows = [row for row in rows if row.get("is_win") not in ("", None)]
@@ -83,6 +91,12 @@ def run_holdout_backtest(
     x_train = np.array(rows_to_matrix(train_rows, feature_columns), dtype=float)
     y_train = np.array([int(row["is_win"]) for row in train_rows], dtype=int)
     model = _fit_model(x_train, y_train, random_state=random_state)
+    train_raw_probabilities = model.predict_proba(x_train)[:, 1]
+    train_rows_with_win_features = attach_win_probability_features(
+        train_rows,
+        train_raw_probabilities.tolist(),
+    )
+    exacta_model = _fit_exacta_model(train_rows_with_win_features, random_state=random_state)
     calibrator, calibration_summary = _fit_probability_calibrator_from_rows(
         train_rows,
         random_state=random_state,
@@ -93,36 +107,54 @@ def run_holdout_backtest(
     x_test = np.array(rows_to_matrix(test_rows, feature_columns), dtype=float)
     y_test = np.array([int(row["is_win"]) for row in test_rows], dtype=int)
     raw_probabilities = model.predict_proba(x_test)[:, 1]
+    test_rows_with_win_features = attach_win_probability_features(
+        test_rows,
+        raw_probabilities.tolist(),
+    )
     probabilities = apply_probability_calibration(
         raw_probabilities,
         calibrator,
     )
-    policy_rows = _select_recent_training_rows(train_rows)
-    betting_policy = _derive_betting_policy(
-        policy_rows,
-        odds_index=odds_index,
-        random_state=random_state,
+    trifecta_probability_maps = (
+        predict_staged_trifecta_probability_maps(
+            test_rows_with_win_features,
+            exacta_model=exacta_model,
+            exacta_feature_columns=list(EXACTA_FEATURE_COLUMNS),
+        )
+        if exacta_model is not None
+        else None
+    )
+    if betting_policy_override and clear_derived_filters:
+        betting_policy = {}
+    else:
+        policy_rows = _select_policy_training_rows(
+            train_rows,
+            evaluation_rows=test_rows,
+            max_dates=MAX_POLICY_SELECTION_DATES,
+        )
+        betting_policy = _derive_betting_policy(
+            policy_rows,
+            odds_index=odds_index,
+            random_state=random_state,
+        )
+    betting_policy = merge_betting_policy(
+        betting_policy,
+        betting_policy_override,
+        clear_derived_filters=clear_derived_filters,
     )
     race_records = _build_race_probability_records(
-        test_rows,
+        test_rows_with_win_features,
         raw_probabilities,
         odds_index=odds_index,
+        trifecta_probability_maps=trifecta_probability_maps,
     )
-    if len({row["date"] for row in test_rows}) == 1:
-        single_day_policy = dict(SINGLE_DAY_ROI_BETTING_POLICY)
-        single_day_summary = evaluate_recommendation_strategy(
-            race_records,
-            payout_model,
-            single_day_policy,
-        )
-        if int(single_day_summary.get("bets") or 0) > 0:
-            betting_policy = single_day_policy
 
     metrics = _evaluate_predictions(
-        test_rows,
+        test_rows_with_win_features,
         y_test,
         probabilities,
         betting_probabilities=raw_probabilities,
+        trifecta_probability_maps=trifecta_probability_maps,
         payout_model=payout_model,
         betting_policy=betting_policy,
         odds_index=odds_index,

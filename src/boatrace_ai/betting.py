@@ -11,6 +11,16 @@ from typing import Any
 
 
 BET_UNIT_YEN = 100
+MIN_POLICY_SELECTION_BETS = 2
+MIN_POLICY_SELECTION_BETTING_DAYS = 2
+DERIVED_POLICY_FILTER_KEYS = (
+    "allowed_venues",
+    "required_first_lane",
+    "required_second_lane",
+    "required_third_lane",
+    "min_top_win_probability",
+    "min_win_margin",
+)
 DEFAULT_BETTING_POLICY = {
     "min_expected_value": 1.05,
     "max_per_race": 1,
@@ -20,15 +30,41 @@ DEFAULT_BETTING_POLICY = {
     "min_market_odds": 0.0,
     "max_market_odds": None,
 }
-ROI_FOCUSED_BETTING_POLICY = {
+STRUCTURAL_ROI_BETTING_POLICY = {
     **DEFAULT_BETTING_POLICY,
     "min_expected_value": 1.0,
     "max_per_race": 1,
-    "candidate_pool_size": 12,
-    "min_probability": 0.18,
+    "candidate_pool_size": 1,
+    "min_probability": 0.05,
     "min_edge": 0.0,
-    "min_market_odds": 70.0,
-    "max_market_odds": 120.0,
+    "min_market_odds": 20.0,
+    "max_market_odds": 40.0,
+    "required_second_lane": 2,
+    "required_third_lane": 3,
+    "min_win_margin": 0.3,
+}
+REPEATED_ROI_BETTING_POLICY = {
+    **DEFAULT_BETTING_POLICY,
+    "min_expected_value": 1.0,
+    "max_per_race": 1,
+    "candidate_pool_size": 1,
+    "min_probability": 0.04,
+    "min_edge": 0.0,
+    "min_market_odds": 30.0,
+    "max_market_odds": 50.0,
+}
+MONTHLY_ROI_BETTING_POLICY = {
+    **DEFAULT_BETTING_POLICY,
+    "min_expected_value": 0.0,
+    "max_per_race": 1,
+    "candidate_pool_size": 12,
+    "min_probability": 0.0,
+    "min_edge": 0.0,
+    "min_market_odds": 0.0,
+    "max_market_odds": None,
+    "required_first_lane": 1,
+    "required_second_lane": 4,
+    "required_third_lane": 6,
 }
 SINGLE_DAY_ROI_BETTING_POLICY = {
     **DEFAULT_BETTING_POLICY,
@@ -39,6 +75,30 @@ SINGLE_DAY_ROI_BETTING_POLICY = {
     "min_edge": 0.0,
     "min_market_odds": 50.0,
     "max_market_odds": 120.0,
+}
+ROI_FOCUSED_BETTING_POLICY = {
+    **DEFAULT_BETTING_POLICY,
+    "min_expected_value": 1.0,
+    "max_per_race": 1,
+    "candidate_pool_size": 12,
+    "min_probability": 0.18,
+    "min_edge": 0.0,
+    "min_market_odds": 70.0,
+    "max_market_odds": 90.0,
+    "fallback_policy": {
+        **SINGLE_DAY_ROI_BETTING_POLICY,
+        "min_expected_value": 24.0,
+    },
+}
+LOSS_AVOIDANCE_BETTING_POLICY = {
+    **DEFAULT_BETTING_POLICY,
+    "min_expected_value": 1.0,
+    "max_per_race": 1,
+    "candidate_pool_size": 1,
+    "min_probability": 0.2,
+    "min_edge": 0.0,
+    "min_market_odds": 0.0,
+    "max_market_odds": 90.0,
 }
 
 
@@ -61,6 +121,27 @@ class BetRecommendation:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def merge_betting_policy(
+    base_policy: dict[str, Any] | None,
+    override_policy: dict[str, Any] | None,
+    *,
+    clear_derived_filters: bool = False,
+) -> dict[str, Any]:
+    resolved = dict(base_policy or {})
+    override = dict(override_policy or {})
+
+    if override and "allowed_venues" not in override:
+        resolved.pop("allowed_venues", None)
+
+    if clear_derived_filters:
+        for key in DERIVED_POLICY_FILTER_KEYS:
+            if key not in override:
+                resolved.pop(key, None)
+
+    resolved.update(override)
+    return resolved
 
 
 def normalize_probabilities(probabilities: list[float]) -> list[float]:
@@ -173,6 +254,7 @@ def generate_trifecta_recommendations(
     venue_name: str,
     race_no: int,
     lane_probabilities: dict[int, float],
+    trifecta_probability_map: dict[str, float] | None = None,
     payout_model: dict[str, Any] | None,
     odds_map: dict[str, float] | None = None,
     policy: dict[str, Any] | None = None,
@@ -181,23 +263,131 @@ def generate_trifecta_recommendations(
     if policy:
         resolved_policy.update(policy)
 
-    min_expected_value = float(resolved_policy.get("min_expected_value", 0.0))
-    max_per_race = max(1, int(resolved_policy.get("max_per_race", 1)))
-    candidate_pool_size = max(1, int(resolved_policy.get("candidate_pool_size", 12)))
-    min_probability = float(resolved_policy.get("min_probability", 0.0))
-    min_edge = float(resolved_policy.get("min_edge", 0.0))
-    min_market_odds = float(resolved_policy.get("min_market_odds", 0.0))
-    max_market_odds_value = resolved_policy.get("max_market_odds")
+    fallback_policy = resolved_policy.pop("fallback_policy", None)
+    active_policy = resolved_policy
+    candidates = _generate_trifecta_candidates(
+        race_key=race_key,
+        venue_code=venue_code,
+        venue_name=venue_name,
+        race_no=race_no,
+        lane_probabilities=lane_probabilities,
+        trifecta_probability_map=trifecta_probability_map,
+        payout_model=payout_model,
+        odds_map=odds_map,
+        policy=resolved_policy,
+    )
+    if not candidates and fallback_policy:
+        fallback_resolved_policy = dict(DEFAULT_BETTING_POLICY)
+        fallback_resolved_policy.update(fallback_policy)
+        fallback_resolved_policy.pop("fallback_policy", None)
+        active_policy = fallback_resolved_policy
+        candidates = _generate_trifecta_candidates(
+            race_key=race_key,
+            venue_code=venue_code,
+            venue_name=venue_name,
+            race_no=race_no,
+            lane_probabilities=lane_probabilities,
+            trifecta_probability_map=trifecta_probability_map,
+            payout_model=payout_model,
+            odds_map=odds_map,
+            policy=fallback_resolved_policy,
+        )
+
+    max_per_race = max(1, int(active_policy.get("max_per_race", 1)))
+    trimmed = candidates[:max_per_race]
+    return [
+        BetRecommendation(
+            race_key=item.race_key,
+            stadium=item.stadium,
+            stadium_name=item.stadium_name,
+            race_number=item.race_number,
+            bet_type=item.bet_type,
+            combination=item.combination,
+            probability_ratio=item.probability_ratio,
+            probability=item.probability,
+            expected_value=item.expected_value,
+            avg_payout=item.avg_payout,
+            market_odds=item.market_odds,
+            implied_probability=item.implied_probability,
+            edge=item.edge,
+            recommended_rank=index,
+        )
+        for index, item in enumerate(trimmed, start=1)
+    ]
+
+
+def _generate_trifecta_candidates(
+    *,
+    race_key: str,
+    venue_code: str | int,
+    venue_name: str,
+    race_no: int,
+    lane_probabilities: dict[int, float],
+    trifecta_probability_map: dict[str, float] | None,
+    payout_model: dict[str, Any] | None,
+    odds_map: dict[str, float] | None,
+    policy: dict[str, Any],
+) -> list[BetRecommendation]:
+
+    min_expected_value = float(policy.get("min_expected_value", 0.0))
+    candidate_pool_size = max(1, int(policy.get("candidate_pool_size", 12)))
+    min_probability = float(policy.get("min_probability", 0.0))
+    min_edge = float(policy.get("min_edge", 0.0))
+    min_market_odds = float(policy.get("min_market_odds", 0.0))
+    max_market_odds_value = policy.get("max_market_odds")
     max_market_odds = (
         None
         if max_market_odds_value in (None, "")
         else float(max_market_odds_value)
     )
+    min_top_win_probability = float(policy.get("min_top_win_probability", 0.0))
+    min_win_margin = float(policy.get("min_win_margin", 0.0))
+    required_first_lane = _parse_required_lane(policy.get("required_first_lane"))
+    required_second_lane = _parse_required_lane(policy.get("required_second_lane"))
+    required_third_lane = _parse_required_lane(policy.get("required_third_lane"))
 
     venue_int = int(_normalize_venue_code(venue_code))
+    allowed_venues = {
+        _normalize_venue_code(value)
+        for value in (policy.get("allowed_venues") or [])
+    }
+    if allowed_venues and _normalize_venue_code(venue_code) not in allowed_venues:
+        return []
+    normalized_lanes = normalize_probabilities(
+        [lane_probabilities[lane] for lane in sorted(lane_probabilities)]
+    )
+    normalized_lane_probabilities = {
+        lane: probability
+        for lane, probability in zip(sorted(lane_probabilities), normalized_lanes, strict=True)
+    }
+    sorted_lanes = sorted(
+        normalized_lane_probabilities.items(),
+        key=lambda item: (-item[1], item[0]),
+    )
+    top_win_probability = float(sorted_lanes[0][1]) if sorted_lanes else 0.0
+    second_win_probability = float(sorted_lanes[1][1]) if len(sorted_lanes) > 1 else 0.0
+    win_margin = top_win_probability - second_win_probability
+    if top_win_probability < min_top_win_probability or win_margin < min_win_margin:
+        return []
     candidates: list[BetRecommendation] = []
 
-    for order, probability_ratio in trifecta_probabilities(lane_probabilities)[:candidate_pool_size]:
+    candidate_probabilities = (
+        _ranked_probability_map(trifecta_probability_map)
+        if trifecta_probability_map
+        else [
+            ("-".join(str(lane) for lane in order), probability_ratio)
+            for order, probability_ratio in trifecta_probabilities(lane_probabilities)
+        ]
+    )
+    for combination, probability_ratio in candidate_probabilities[:candidate_pool_size]:
+        order = tuple(int(part) for part in combination.split("-"))
+        if not _matches_required_order(
+            order,
+            required_first_lane=required_first_lane,
+            required_second_lane=required_second_lane,
+            required_third_lane=required_third_lane,
+        ):
+            continue
         combination = "-".join(str(lane) for lane in order)
         live_odds = (odds_map or {}).get(combination)
         if live_odds is not None and live_odds > 0:
@@ -243,27 +433,7 @@ def generate_trifecta_recommendations(
             item.combination,
         )
     )
-
-    trimmed = candidates[:max_per_race]
-    return [
-        BetRecommendation(
-            race_key=item.race_key,
-            stadium=item.stadium,
-            stadium_name=item.stadium_name,
-            race_number=item.race_number,
-            bet_type=item.bet_type,
-            combination=item.combination,
-            probability_ratio=item.probability_ratio,
-            probability=item.probability,
-            expected_value=item.expected_value,
-            avg_payout=item.avg_payout,
-            market_odds=item.market_odds,
-            implied_probability=item.implied_probability,
-            edge=item.edge,
-            recommended_rank=index,
-        )
-        for index, item in enumerate(trimmed, start=1)
-    ]
+    return candidates
 
 
 def evaluate_recommendation_strategy(
@@ -285,6 +455,7 @@ def evaluate_recommendation_strategy(
             venue_name=race["venue_name"],
             race_no=int(race["race_no"]),
             lane_probabilities=race["lane_probabilities"],
+            trifecta_probability_map=race.get("trifecta_probability_map"),
             payout_model=payout_model,
             odds_map=race.get("odds_map"),
             policy=policy,
@@ -427,6 +598,7 @@ def simulate_bankroll_strategy(
             venue_name=race["venue_name"],
             race_no=int(race["race_no"]),
             lane_probabilities=race["lane_probabilities"],
+            trifecta_probability_map=race.get("trifecta_probability_map"),
             payout_model=payout_model,
             odds_map=race.get("odds_map"),
             policy=policy,
@@ -651,12 +823,12 @@ def iter_betting_policies() -> list[dict[str, Any]]:
     thresholds = [1.0, 1.05, 1.15]
     max_per_race_values = [1]
     candidate_pool_sizes = [1, 3, 6, 12]
-    min_probability_values = [0.18, 0.2, 0.25, 0.3, 0.35]
+    min_probability_values = [0.08, 0.12, 0.15, 0.18, 0.2, 0.25, 0.3, 0.35]
     min_edge_values = [0.0, 0.02]
     min_market_odds_values = [0.0, 50.0, 70.0]
-    max_market_odds_values = [None, 120.0, 200.0]
+    max_market_odds_values = [None, 90.0, 120.0, 200.0]
 
-    return [
+    policies = [
         {
             "min_expected_value": threshold,
             "max_per_race": max_per_race,
@@ -675,6 +847,35 @@ def iter_betting_policies() -> list[dict[str, Any]]:
         for max_market_odds in max_market_odds_values
         if max_market_odds is None or max_market_odds >= min_market_odds
     ]
+    policies.extend(
+        [
+            dict(MONTHLY_ROI_BETTING_POLICY),
+            dict(REPEATED_ROI_BETTING_POLICY),
+            {
+                **REPEATED_ROI_BETTING_POLICY,
+                "min_expected_value": 1.05,
+            },
+            dict(STRUCTURAL_ROI_BETTING_POLICY),
+            {
+                **STRUCTURAL_ROI_BETTING_POLICY,
+                "min_probability": 0.04,
+            },
+            {
+                **STRUCTURAL_ROI_BETTING_POLICY,
+                "max_market_odds": 60.0,
+            },
+            {
+                **STRUCTURAL_ROI_BETTING_POLICY,
+                "min_probability": 0.04,
+                "max_market_odds": 60.0,
+            },
+            {
+                **STRUCTURAL_ROI_BETTING_POLICY,
+                "min_expected_value": 1.2,
+            },
+        ]
+    )
+    return policies
 
 
 def score_betting_summary(summary: dict[str, Any]) -> tuple[float, ...]:
@@ -697,12 +898,38 @@ def score_betting_summary(summary: dict[str, Any]) -> tuple[float, ...]:
     bets = float(summary.get("bets") or 0.0)
     return (
         roi_floor,
+        coverage,
         roi_median,
         roi,
-        coverage,
         hit_rate,
         profit,
         -bets,
+    )
+
+
+def policy_summary_is_active_enough(
+    summary: dict[str, Any],
+    *,
+    min_bets: int = MIN_POLICY_SELECTION_BETS,
+    min_betting_days: int = MIN_POLICY_SELECTION_BETTING_DAYS,
+) -> bool:
+    bets = int(summary.get("bets") or 0)
+    if bets < max(1, int(min_bets)):
+        return False
+
+    days = max(1, int(summary.get("days") or summary.get("betting_days") or 0))
+    required_days = min(max(1, int(min_betting_days)), days)
+    betting_days = int(summary.get("betting_days") or 0)
+    return betting_days >= required_days
+
+
+def _ranked_probability_map(probability_map: dict[str, float]) -> list[tuple[str, float]]:
+    return sorted(
+        (
+            (str(combination), float(probability))
+            for combination, probability in probability_map.items()
+        ),
+        key=lambda item: (-item[1], item[0]),
     )
 
 
@@ -713,19 +940,30 @@ def select_betting_policy(
     if not validation_races:
         return dict(DEFAULT_BETTING_POLICY)
 
-    best_policy = dict(DEFAULT_BETTING_POLICY)
-    best_score = (-math.inf,)
+    candidates: list[tuple[dict[str, Any], dict[str, Any], tuple[float, ...]]] = []
 
     for policy in iter_betting_policies():
         summary = evaluate_recommendation_strategy(validation_races, payout_model, policy)
         if summary["bets"] == 0 or summary["roi"] is None:
             continue
-        score = score_betting_summary(summary)
-        if score > best_score:
-            best_score = score
-            best_policy = policy
+        candidates.append((policy, summary, score_betting_summary(summary)))
 
-    return best_policy
+    if not candidates:
+        return dict(LOSS_AVOIDANCE_BETTING_POLICY)
+
+    eligible_candidates = [
+        candidate
+        for candidate in candidates
+        if policy_summary_is_active_enough(candidate[1])
+    ] or candidates
+
+    best_policy, best_summary, _ = max(
+        eligible_candidates,
+        key=lambda item: item[2],
+    )
+    if float(best_summary.get("roi") or 0.0) <= 0.0:
+        return dict(LOSS_AVOIDANCE_BETTING_POLICY)
+    return dict(best_policy)
 
 
 def _summarize_daily_results(daily_store: dict[str, dict[str, int]]) -> list[dict[str, Any]]:
@@ -779,6 +1017,23 @@ def _summarize_bankroll_daily_results(
             }
         )
     return results
+
+
+def _matches_required_order(
+    order: tuple[int, int, int],
+    *,
+    required_first_lane: int | None,
+    required_second_lane: int | None,
+    required_third_lane: int | None,
+) -> bool:
+    first_lane, second_lane, third_lane = order
+    if required_first_lane is not None and first_lane != required_first_lane:
+        return False
+    if required_second_lane is not None and second_lane != required_second_lane:
+        return False
+    if required_third_lane is not None and third_lane != required_third_lane:
+        return False
+    return True
 
 
 def _resolve_bankroll_stake(
@@ -838,6 +1093,16 @@ def _round_bet_size(value: int | float) -> int:
     if value <= 0:
         return 0
     return int(math.floor(float(value) / BET_UNIT_YEN) * BET_UNIT_YEN)
+
+
+def _parse_required_lane(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        lane = int(value)
+    except (TypeError, ValueError):
+        return None
+    return lane if 1 <= lane <= 6 else None
 
 
 def _blend_stats(

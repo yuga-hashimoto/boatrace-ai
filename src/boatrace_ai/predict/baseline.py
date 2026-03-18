@@ -67,6 +67,7 @@ class RacePrediction:
     race: RaceCard
     entrants: list[EntrantPrediction]
     trifectas: list[TrifectaPrediction]
+    trifecta_probability_map: dict[str, float] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)

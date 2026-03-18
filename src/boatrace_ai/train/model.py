@@ -21,24 +21,42 @@ from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
 from boatrace_ai.betting import (
     DEFAULT_BETTING_POLICY,
+    LOSS_AVOIDANCE_BETTING_POLICY,
+    MONTHLY_ROI_BETTING_POLICY,
     ROI_FOCUSED_BETTING_POLICY,
     SINGLE_DAY_ROI_BETTING_POLICY,
     build_payout_model,
     evaluate_recommendation_strategy,
     iter_betting_policies,
     normalize_probabilities,
+    policy_summary_is_active_enough,
     score_betting_summary,
     select_betting_policy,
 )
 from boatrace_ai.calibration import apply_probability_calibration, fit_platt_calibrator
 from boatrace_ai.collect.history import iter_race_record_paths, load_race_record
 from boatrace_ai.features.dataset import FEATURE_COLUMNS, rows_to_matrix
+from boatrace_ai.trifecta import (
+    EXACTA_FEATURE_COLUMNS,
+    TRIFECTA_FEATURE_COLUMNS,
+    attach_win_probability_features,
+    build_exacta_examples,
+    build_trifecta_examples,
+    exacta_rows_to_matrix,
+    predict_staged_trifecta_probability_maps,
+    predict_trifecta_probability_maps,
+    trifecta_rows_to_matrix,
+)
 
 
 DEFAULT_TIMEZONE = ZoneInfo("Asia/Tokyo")
 MAX_TRAINING_DATE_GAP_DAYS = 3
+MAX_POLICY_SELECTION_DATES = 4
+MAX_WALK_FORWARD_DATES = 7
+MAX_VENUE_FILTER_CANDIDATES = 4
 MIN_WALK_FORWARD_TRAIN_RACES = 8
 MAX_CALIBRATION_DATES = 60
+LONG_WINDOW_MONTHLY_POLICY_MIN_DATES = 20
 CONSERVATIVE_SINGLE_DAY_POLICY = {
     **DEFAULT_BETTING_POLICY,
     "candidate_pool_size": 1,
@@ -83,11 +101,22 @@ def train_win_model(
     train_rows, test_rows = _split_rows_by_date(labeled_rows, train_end_date)
     if not train_rows:
         raise ValueError("Training split is empty. Adjust train_end_date or collect more data.")
-    policy_rows = _select_recent_training_rows(train_rows)
     feature_columns = FEATURE_COLUMNS
     x_train = np.array(rows_to_matrix(train_rows, feature_columns), dtype=float)
     y_train = np.array([int(row["is_win"]) for row in train_rows], dtype=int)
     model = _fit_model(x_train, y_train, random_state=random_state)
+    train_raw_probabilities = model.predict_proba(x_train)[:, 1]
+    train_rows_with_win_features = attach_win_probability_features(
+        train_rows,
+        train_raw_probabilities.tolist(),
+    )
+    policy_rows = _select_policy_training_rows(
+        train_rows_with_win_features,
+        evaluation_rows=test_rows,
+        max_dates=MAX_POLICY_SELECTION_DATES,
+    )
+    exacta_model = _fit_exacta_model(train_rows_with_win_features, random_state=random_state)
+    exacta_feature_columns = list(EXACTA_FEATURE_COLUMNS)
     calibrator, calibration_summary = _fit_probability_calibrator_from_rows(
         train_rows,
         random_state=random_state,
@@ -101,12 +130,16 @@ def train_win_model(
         "train_race_count": len({row["race_key"] for row in train_rows}),
     }
     metrics.update(_prefix_calibration_summary(calibration_summary))
-    walk_forward_rows = _select_recent_training_rows(labeled_rows)
+    walk_forward_rows = _select_recent_training_rows(
+        labeled_rows,
+        max_dates=MAX_WALK_FORWARD_DATES,
+    )
     walk_forward_summary = _walk_forward_backtest(
         walk_forward_rows,
         odds_index=odds_index,
         random_state=random_state,
         policy=betting_policy,
+        trifecta_feature_columns=exacta_feature_columns,
     )
     if walk_forward_summary:
         metrics.update(
@@ -124,13 +157,27 @@ def train_win_model(
         x_test = np.array(rows_to_matrix(test_rows, feature_columns), dtype=float)
         y_test = np.array([int(row["is_win"]) for row in test_rows], dtype=int)
         raw_probabilities = model.predict_proba(x_test)[:, 1]
+        test_rows_with_win_features = attach_win_probability_features(
+            test_rows,
+            raw_probabilities.tolist(),
+        )
         probabilities = apply_probability_calibration(raw_probabilities, calibrator)
+        trifecta_probability_maps = (
+            predict_staged_trifecta_probability_maps(
+                test_rows_with_win_features,
+                exacta_model=exacta_model,
+                exacta_feature_columns=exacta_feature_columns,
+            )
+            if exacta_model is not None
+            else None
+        )
         metrics.update(
             _evaluate_predictions(
-                test_rows,
+                test_rows_with_win_features,
                 y_test,
                 probabilities,
                 betting_probabilities=raw_probabilities,
+                trifecta_probability_maps=trifecta_probability_maps,
                 payout_model=payout_model,
                 betting_policy=betting_policy,
                 odds_index=odds_index,
@@ -148,9 +195,11 @@ def train_win_model(
     artifact_path = output_dir / f"win_model_{timestamp}.joblib"
     joblib.dump(
         {
-            "model_name": "hist_gradient_boosting_win_v1",
+            "model_name": "hist_gradient_boosting_win_v2",
             "trained_at": datetime.now(tz=DEFAULT_TIMEZONE).isoformat(),
             "feature_columns": feature_columns,
+            "trifecta_feature_columns": list(TRIFECTA_FEATURE_COLUMNS),
+            "exacta_feature_columns": exacta_feature_columns,
             "train_end_date": train_end_date,
             "training_max_gap_days": MAX_TRAINING_DATE_GAP_DAYS,
             "random_state": random_state,
@@ -166,6 +215,8 @@ def train_win_model(
             "train_rows": len(train_rows),
             "test_rows": len(test_rows),
             "model": model,
+            "trifecta_model": None,
+            "exacta_model": exacta_model,
         },
         artifact_path,
     )
@@ -222,6 +273,7 @@ def _select_recent_training_rows(
     rows: list[dict[str, Any]],
     *,
     max_gap_days: int = MAX_TRAINING_DATE_GAP_DAYS,
+    max_dates: int | None = None,
 ) -> list[dict[str, Any]]:
     unique_dates = sorted({row["date"] for row in rows})
     if len(unique_dates) <= 1:
@@ -235,8 +287,28 @@ def _select_recent_training_rows(
             break
         selected_dates.append(previous_date)
 
+    if max_dates is not None and max_dates > 0:
+        selected_dates = selected_dates[: max(1, int(max_dates))]
+
     selected_set = set(selected_dates)
     return [row for row in rows if row["date"] in selected_set]
+
+
+def _select_policy_training_rows(
+    train_rows: list[dict[str, Any]],
+    *,
+    evaluation_rows: list[dict[str, Any]] | None = None,
+    max_dates: int = MAX_POLICY_SELECTION_DATES,
+) -> list[dict[str, Any]]:
+    if evaluation_rows:
+        evaluation_dates = sorted({row["date"] for row in evaluation_rows})
+        if len(evaluation_dates) >= LONG_WINDOW_MONTHLY_POLICY_MIN_DATES:
+            return train_rows
+
+    return _select_recent_training_rows(
+        train_rows,
+        max_dates=max_dates,
+    )
 
 
 def _assert_training_thresholds(
@@ -276,6 +348,7 @@ def _evaluate_predictions(
     probabilities: np.ndarray,
     *,
     betting_probabilities: np.ndarray | None,
+    trifecta_probability_maps: dict[str, dict[str, float]] | None,
     payout_model: dict[str, Any] | None,
     betting_policy: dict[str, Any],
     odds_index: dict[str, dict[str, float]],
@@ -295,6 +368,8 @@ def _evaluate_predictions(
     race_count = len(grouped)
     top1_hits = 0
     top3_hits = 0
+    direct_trifecta_hits = 0
+    direct_trifecta_races = 0
     win_stake = 0
     win_return = 0
     trifecta_stake = 0
@@ -310,10 +385,21 @@ def _evaluate_predictions(
             top3_hits += 1
         win_stake += 100
 
-        predicted_trifecta = _predict_top_trifecta(entrants)
+        predicted_trifecta = None
+        direct_probability_map = (trifecta_probability_maps or {}).get(race_key, {})
+        if direct_probability_map:
+            direct_trifecta_races += 1
+            predicted_trifecta = max(
+                direct_probability_map.items(),
+                key=lambda item: (float(item[1]), item[0]),
+            )[0]
+        if predicted_trifecta is None:
+            predicted_trifecta = _predict_top_trifecta(entrants)
         actual_trifecta_key = entrants[0][0].get("trifecta_key")
         if predicted_trifecta and actual_trifecta_key and predicted_trifecta == actual_trifecta_key:
             trifecta_return += int(entrants[0][0].get("trifecta_payout_yen") or 0)
+            if direct_probability_map:
+                direct_trifecta_hits += 1
         trifecta_stake += 100
 
     metrics.update(
@@ -321,6 +407,11 @@ def _evaluate_predictions(
             "race_count": race_count,
             "top1_hit_rate": round(top1_hits / race_count, 6) if race_count else None,
             "winner_in_top3_rate": round(top3_hits / race_count, 6) if race_count else None,
+            "direct_trifecta_top1_hit_rate": (
+                round(direct_trifecta_hits / direct_trifecta_races, 6)
+                if direct_trifecta_races
+                else None
+            ),
             "win_bet_roi": round((win_return - win_stake) / win_stake, 6) if win_stake else None,
             "trifecta_bet_roi": round((trifecta_return - trifecta_stake) / trifecta_stake, 6) if trifecta_stake else None,
             "win_bet_return": win_return,
@@ -333,6 +424,7 @@ def _evaluate_predictions(
             test_rows,
             betting_probabilities if betting_probabilities is not None else probabilities,
             odds_index=odds_index,
+            trifecta_probability_maps=trifecta_probability_maps,
         ),
         payout_model,
         betting_policy,
@@ -374,6 +466,64 @@ def _fit_model(
     return model
 
 
+def _fit_trifecta_model(
+    rows: list[dict[str, Any]],
+    *,
+    random_state: int,
+) -> HistGradientBoostingClassifier | None:
+    trifecta_rows = build_trifecta_examples(rows)
+    if not trifecta_rows:
+        return None
+
+    x_train = np.array(trifecta_rows_to_matrix(trifecta_rows, list(TRIFECTA_FEATURE_COLUMNS)), dtype=float)
+    y_train = np.array([int(row["is_target"]) for row in trifecta_rows], dtype=int)
+    positive_count = int(np.sum(y_train))
+    negative_count = int(len(y_train) - positive_count)
+    if positive_count <= 0 or negative_count <= 0:
+        return None
+
+    positive_weight = min(40.0, max(8.0, negative_count / positive_count / 3.0))
+    sample_weight = np.where(y_train == 1, positive_weight, 1.0)
+    model = HistGradientBoostingClassifier(
+        learning_rate=0.05,
+        max_depth=6,
+        max_iter=300,
+        min_samples_leaf=20,
+        random_state=random_state,
+    )
+    model.fit(x_train, y_train, sample_weight=sample_weight)
+    return model
+
+
+def _fit_exacta_model(
+    rows: list[dict[str, Any]],
+    *,
+    random_state: int,
+) -> HistGradientBoostingClassifier | None:
+    exacta_rows = build_exacta_examples(rows)
+    if not exacta_rows:
+        return None
+
+    x_train = np.array(exacta_rows_to_matrix(exacta_rows, list(EXACTA_FEATURE_COLUMNS)), dtype=float)
+    y_train = np.array([int(row["is_target"]) for row in exacta_rows], dtype=int)
+    positive_count = int(np.sum(y_train))
+    negative_count = int(len(y_train) - positive_count)
+    if positive_count <= 0 or negative_count <= 0:
+        return None
+
+    positive_weight = min(24.0, max(4.0, negative_count / positive_count / 2.0))
+    sample_weight = np.where(y_train == 1, positive_weight, 1.0)
+    model = HistGradientBoostingClassifier(
+        learning_rate=0.05,
+        max_depth=5,
+        max_iter=240,
+        min_samples_leaf=20,
+        random_state=random_state,
+    )
+    model.fit(x_train, y_train, sample_weight=sample_weight)
+    return model
+
+
 def _derive_betting_policy(
     train_rows: list[dict[str, Any]],
     *,
@@ -384,33 +534,73 @@ def _derive_betting_policy(
     if len(unique_dates) < 2:
         return dict(CONSERVATIVE_SINGLE_DAY_POLICY)
 
+    walk_forward_contexts = _prepare_walk_forward_contexts(
+        train_rows,
+        odds_index=odds_index,
+        random_state=random_state,
+        dates=unique_dates,
+    )
     walk_forward_policy = _select_betting_policy_walk_forward(
         train_rows,
         odds_index=odds_index,
         random_state=random_state,
+        fold_contexts=walk_forward_contexts,
     )
     if walk_forward_policy:
-        return walk_forward_policy
+        monthly_override = _select_long_window_monthly_policy(
+            unique_dates=unique_dates,
+            fold_contexts=walk_forward_contexts,
+            selected_policy=walk_forward_policy,
+        )
+        if monthly_override:
+            return monthly_override
+        return _apply_venue_filter(walk_forward_policy, walk_forward_contexts)
     if len(unique_dates) >= 3:
-        return dict(ROI_FOCUSED_BETTING_POLICY)
+        return dict(LOSS_AVOIDANCE_BETTING_POLICY)
 
     fit_rows, validation_rows = _split_rows_for_policy_selection(train_rows)
     if not fit_rows or not validation_rows:
-        return dict(ROI_FOCUSED_BETTING_POLICY)
+        return dict(LOSS_AVOIDANCE_BETTING_POLICY)
 
     x_fit = np.array(rows_to_matrix(fit_rows, FEATURE_COLUMNS), dtype=float)
     y_fit = np.array([int(row["is_win"]) for row in fit_rows], dtype=int)
     selector_model = _fit_model(x_fit, y_fit, random_state=random_state)
+    fit_raw_probabilities = selector_model.predict_proba(x_fit)[:, 1]
+    fit_rows_with_win_features = attach_win_probability_features(
+        fit_rows,
+        fit_raw_probabilities.tolist(),
+    )
 
     x_validation = np.array(rows_to_matrix(validation_rows, FEATURE_COLUMNS), dtype=float)
     validation_probabilities = selector_model.predict_proba(x_validation)[:, 1]
-    validation_races = _build_race_probability_records(
+    validation_rows_with_win_features = attach_win_probability_features(
         validation_rows,
+        validation_probabilities.tolist(),
+    )
+    validation_races = _build_race_probability_records(
+        validation_rows_with_win_features,
         validation_probabilities,
         odds_index=odds_index,
+        trifecta_probability_maps=_predict_trifecta_probability_maps_for_rows(
+            fit_rows_with_win_features,
+            validation_rows_with_win_features,
+            random_state=random_state,
+            fit_raw_probabilities=fit_raw_probabilities,
+            prediction_raw_probabilities=validation_probabilities,
+        ),
     )
     payout_model = build_payout_model(fit_rows)
-    return select_betting_policy(validation_races, payout_model)
+    selected_policy = select_betting_policy(validation_races, payout_model)
+    return _apply_venue_filter(
+        selected_policy,
+        [
+            {
+                "fold_date": validation_rows[0]["date"] if validation_rows else "",
+                "validation_races": validation_races,
+                "payout_model": payout_model,
+            }
+        ],
+    )
 
 
 def _select_betting_policy_walk_forward(
@@ -418,12 +608,13 @@ def _select_betting_policy_walk_forward(
     *,
     odds_index: dict[str, dict[str, float]],
     random_state: int,
+    fold_contexts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     unique_dates = sorted({row["date"] for row in rows})
     if len(unique_dates) < 3:
         return None
 
-    fold_contexts = _prepare_walk_forward_contexts(
+    fold_contexts = fold_contexts or _prepare_walk_forward_contexts(
         rows,
         odds_index=odds_index,
         random_state=random_state,
@@ -432,22 +623,106 @@ def _select_betting_policy_walk_forward(
     if not fold_contexts:
         return None
 
-    best_policy: dict[str, Any] | None = None
-    best_score = (-math.inf,)
+    candidates: list[tuple[dict[str, Any], dict[str, Any], tuple[float, ...]]] = []
 
     for policy in iter_betting_policies():
-        summary = _summarize_walk_forward_contexts(fold_contexts, policy)
-        if not summary or summary.get("bets", 0) == 0 or summary.get("roi") is None:
-            continue
-        score = score_betting_summary(summary)
-        if score > best_score:
-            best_score = score
-            best_policy = policy
+        for candidate_policy, summary in _iter_policy_candidates_with_venue_filters(
+            policy,
+            fold_contexts,
+        ):
+            candidates.append((candidate_policy, summary, score_betting_summary(summary)))
 
-    if best_policy is None or best_score[2] <= 0:
+    if not candidates:
         return None
 
-    return best_policy
+    eligible_candidates = [
+        candidate
+        for candidate in candidates
+        if policy_summary_is_active_enough(candidate[1])
+    ] or candidates
+
+    best_policy, best_summary, _ = max(
+        eligible_candidates,
+        key=lambda item: item[2],
+    )
+    if float(best_summary.get("roi") or 0.0) <= 0.0:
+        return dict(LOSS_AVOIDANCE_BETTING_POLICY)
+
+    return dict(best_policy)
+
+
+def _iter_policy_candidates_with_venue_filters(
+    policy: dict[str, Any],
+    fold_contexts: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
+
+    summary = _summarize_walk_forward_contexts(fold_contexts, policy)
+    if summary and summary.get("bets", 0) > 0 and summary.get("roi") is not None:
+        candidates.append((dict(policy), summary))
+
+    if policy.get("allowed_venues"):
+        return candidates
+
+    venue_summaries = _summarize_venues_for_policy(fold_contexts, policy)
+    positive_venues = [
+        venue_code
+        for venue_code, venue_summary in sorted(
+            venue_summaries.items(),
+            key=lambda item: score_betting_summary(item[1]),
+            reverse=True,
+        )
+        if float(venue_summary.get("roi") or 0.0) > 0.0
+        and (
+            int(venue_summary.get("bets") or 0) >= 2
+            or int(venue_summary.get("hits") or 0) >= 1
+        )
+    ]
+    if not positive_venues:
+        return candidates
+
+    for candidate_count in range(1, min(MAX_VENUE_FILTER_CANDIDATES, len(positive_venues)) + 1):
+        filtered_policy = dict(policy)
+        filtered_policy["allowed_venues"] = positive_venues[:candidate_count]
+        filtered_summary = _summarize_walk_forward_contexts(fold_contexts, filtered_policy)
+        if not filtered_summary or filtered_summary.get("bets", 0) == 0 or filtered_summary.get("roi") is None:
+            continue
+        candidates.append((filtered_policy, filtered_summary))
+
+    return candidates
+
+
+def _select_long_window_monthly_policy(
+    *,
+    unique_dates: list[str],
+    fold_contexts: list[dict[str, Any]],
+    selected_policy: dict[str, Any],
+) -> dict[str, Any] | None:
+    if len(unique_dates) < LONG_WINDOW_MONTHLY_POLICY_MIN_DATES:
+        return None
+    if not fold_contexts:
+        return None
+
+    monthly_summary = _summarize_walk_forward_contexts(
+        fold_contexts,
+        MONTHLY_ROI_BETTING_POLICY,
+    )
+    if not monthly_summary or not policy_summary_is_active_enough(monthly_summary):
+        return None
+
+    monthly_roi = float(monthly_summary.get("roi") or 0.0)
+    if monthly_roi < 1.2:
+        return None
+
+    selected_summary = _summarize_walk_forward_contexts(
+        fold_contexts,
+        selected_policy,
+    )
+    selected_roi = float(selected_summary.get("roi") or 0.0) if selected_summary else 0.0
+    if monthly_roi <= selected_roi:
+        return None
+
+    return dict(MONTHLY_ROI_BETTING_POLICY)
 
 
 def _split_rows_for_policy_selection(
@@ -484,12 +759,14 @@ def _walk_forward_backtest(
     random_state: int,
     policy: dict[str, Any],
     dates: list[str] | None = None,
+    trifecta_feature_columns: list[str] | None = None,
 ) -> dict[str, Any] | None:
     fold_contexts = _prepare_walk_forward_contexts(
         rows,
         odds_index=odds_index,
         random_state=random_state,
         dates=dates,
+        trifecta_feature_columns=trifecta_feature_columns,
     )
     return _summarize_walk_forward_contexts(fold_contexts, policy)
 
@@ -500,6 +777,7 @@ def _prepare_walk_forward_contexts(
     odds_index: dict[str, dict[str, float]],
     random_state: int,
     dates: list[str] | None = None,
+    trifecta_feature_columns: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     unique_dates = dates or sorted({row["date"] for row in rows})
     if len(unique_dates) < 2:
@@ -516,12 +794,29 @@ def _prepare_walk_forward_contexts(
         x_fit = np.array(rows_to_matrix(fit_rows, FEATURE_COLUMNS), dtype=float)
         y_fit = np.array([int(row["is_win"]) for row in fit_rows], dtype=int)
         selector_model = _fit_model(x_fit, y_fit, random_state=random_state)
+        fit_raw_probabilities = selector_model.predict_proba(x_fit)[:, 1]
+        fit_rows_with_win_features = attach_win_probability_features(
+            fit_rows,
+            fit_raw_probabilities.tolist(),
+        )
         x_validation = np.array(rows_to_matrix(validation_rows, FEATURE_COLUMNS), dtype=float)
         validation_probabilities = selector_model.predict_proba(x_validation)[:, 1]
-        validation_races = _build_race_probability_records(
+        validation_rows_with_win_features = attach_win_probability_features(
             validation_rows,
+            validation_probabilities.tolist(),
+        )
+        validation_races = _build_race_probability_records(
+            validation_rows_with_win_features,
             validation_probabilities,
             odds_index=odds_index,
+            trifecta_probability_maps=_predict_trifecta_probability_maps_for_rows(
+                fit_rows_with_win_features,
+                validation_rows_with_win_features,
+                random_state=random_state,
+                fit_raw_probabilities=fit_raw_probabilities,
+                prediction_raw_probabilities=validation_probabilities,
+                feature_columns=trifecta_feature_columns,
+            ),
         )
         fold_contexts.append(
             {
@@ -560,6 +855,60 @@ def _summarize_walk_forward_contexts(
     return aggregate
 
 
+def _apply_venue_filter(
+    policy: dict[str, Any],
+    fold_contexts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    venue_summaries = _summarize_venues_for_policy(fold_contexts, policy)
+    if not venue_summaries:
+        return dict(policy)
+
+    blocked_venues = [
+        venue_code
+        for venue_code, summary in venue_summaries.items()
+        if int(summary.get("bets") or 0) >= 2
+        and int(summary.get("positive_days") or 0) == 0
+        and float(summary.get("roi") or -1.0) <= 0.0
+    ]
+    if not blocked_venues:
+        return dict(policy)
+
+    all_venues = set(venue_summaries)
+    allowed_venues = sorted(all_venues - set(blocked_venues))
+    if not allowed_venues or len(allowed_venues) == len(all_venues):
+        return dict(policy)
+
+    resolved = dict(policy)
+    resolved["allowed_venues"] = allowed_venues
+    return resolved
+
+
+def _summarize_venues_for_policy(
+    fold_contexts: list[dict[str, Any]],
+    policy: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    per_venue: dict[str, list[dict[str, Any]]] = {}
+    for fold_context in fold_contexts:
+        races_by_venue: dict[str, list[dict[str, Any]]] = {}
+        for race in fold_context["validation_races"]:
+            venue_code = str(race.get("venue_code") or "").zfill(2)
+            races_by_venue.setdefault(venue_code, []).append(race)
+        for venue_code, venue_races in races_by_venue.items():
+            summary = evaluate_recommendation_strategy(
+                venue_races,
+                fold_context["payout_model"],
+                policy,
+            )
+            summary["fold_date"] = fold_context["fold_date"]
+            per_venue.setdefault(venue_code, []).append(summary)
+
+    return {
+        venue_code: _aggregate_strategy_summaries(summaries)
+        for venue_code, summaries in per_venue.items()
+        if summaries
+    }
+
+
 def _aggregate_strategy_summaries(
     summaries: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -591,6 +940,35 @@ def _aggregate_strategy_summaries(
         "daily_roi_floor": round(min(daily_rois), 6) if daily_rois else None,
         "daily_roi_median": round(float(np.median(daily_rois)), 6) if daily_rois else None,
     }
+
+
+def _predict_trifecta_probability_maps_for_rows(
+    fit_rows: list[dict[str, Any]],
+    prediction_rows: list[dict[str, Any]],
+    *,
+    random_state: int,
+    fit_raw_probabilities: np.ndarray | None = None,
+    prediction_raw_probabilities: np.ndarray | None = None,
+    feature_columns: list[str] | None = None,
+) -> dict[str, dict[str, float]] | None:
+    fit_rows_for_trifecta = (
+        attach_win_probability_features(fit_rows, fit_raw_probabilities.tolist())
+        if fit_raw_probabilities is not None
+        else fit_rows
+    )
+    prediction_rows_for_trifecta = (
+        attach_win_probability_features(prediction_rows, prediction_raw_probabilities.tolist())
+        if prediction_raw_probabilities is not None
+        else prediction_rows
+    )
+    exacta_model = _fit_exacta_model(fit_rows_for_trifecta, random_state=random_state)
+    if exacta_model is None:
+        return None
+    return predict_staged_trifecta_probability_maps(
+        prediction_rows_for_trifecta,
+        exacta_model=exacta_model,
+        exacta_feature_columns=feature_columns or list(EXACTA_FEATURE_COLUMNS),
+    )
 
 
 def _prefix_summary_metrics(summary: dict[str, Any], *, label_prefix: str) -> dict[str, Any]:
@@ -677,6 +1055,7 @@ def _build_race_probability_records(
     probabilities: np.ndarray,
     *,
     odds_index: dict[str, dict[str, float]],
+    trifecta_probability_maps: dict[str, dict[str, float]] | None = None,
 ) -> list[dict[str, Any]]:
     grouped: dict[str, dict[str, Any]] = {}
     for row, probability in zip(rows, probabilities, strict=True):
@@ -691,6 +1070,7 @@ def _build_race_probability_records(
                 "race_no": int(float(row["race_no"])),
                 "lane_probabilities": {},
                 "odds_map": odds_index.get(race_key, {}),
+                "trifecta_probability_map": (trifecta_probability_maps or {}).get(race_key, {}),
                 "actual_trifecta_key": row.get("trifecta_key"),
                 "actual_trifecta_payout_yen": _parse_int(row.get("trifecta_payout_yen")),
             },

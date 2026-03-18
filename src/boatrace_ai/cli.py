@@ -7,12 +7,20 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
-from boatrace_ai.betting import DEFAULT_BETTING_POLICY, generate_trifecta_recommendations
+from boatrace_ai.betting import (
+    DEFAULT_BETTING_POLICY,
+    generate_trifecta_recommendations,
+    merge_betting_policy,
+    MONTHLY_ROI_BETTING_POLICY,
+    REPEATED_ROI_BETTING_POLICY,
+    STRUCTURAL_ROI_BETTING_POLICY,
+)
 from boatrace_ai.collect.history import collect_race_records, refresh_missing_trifecta_odds
-from boatrace_ai.collect.official_download import sync_official_download_to_db
-from boatrace_ai.collect.official import OfficialBoatraceClient, compact_race_date, restore_race_date
+from boatrace_ai.collect.official_download import fetch_program_cards_from_official_download, sync_official_download_to_db
+from boatrace_ai.collect.official import OfficialBoatraceClient, RaceCard, compact_race_date, restore_race_date
 from boatrace_ai.evaluate.backtest import run_holdout_backtest
 from boatrace_ai.features.dataset import build_dataset
 from boatrace_ai.note.evening import generate_evening_note
@@ -236,6 +244,8 @@ def _backtest_handler(args: argparse.Namespace) -> int:
             if args.daily_take_profit_yen is not None
             else risk_management.get("daily_take_profit_yen")
         ),
+        betting_policy_override=_betting_policy_override_from_args(args),
+        clear_derived_filters=bool(getattr(args, "clear_derived_filters", False)),
     )
     payload = result.to_dict()
     output_path = Path(args.output_path) if args.output_path else _default_backtest_output_path(config)
@@ -296,6 +306,85 @@ def _predict_handler(args: argparse.Namespace) -> int:
         },
     )
     print(_format_prediction_summary(predictions, recommendations, output_path))
+    return 0
+
+
+def _predict_live_handler(args: argparse.Namespace) -> int:
+    config = _load_config(Path(args.config))
+    race_date = _resolve_race_date(args.race_date, config)
+    venue_filters = args.venue or config.get("inference", {}).get("venues", [])
+    artifact = _load_prediction_artifact(args.model_path, config)
+    betting_policy = _resolve_betting_policy(args, config, artifact)
+    now = _resolve_live_now(getattr(args, "now", None))
+    cache_path = Path(config.get("paths", {}).get("raw_dir", "data/raw")) / compact_race_date(race_date) / "_program_cards.json"
+
+    cards = fetch_program_cards_from_official_download(
+        race_date,
+        request_timeout=args.request_timeout,
+        cache_path=cache_path,
+    )
+    cards = _select_venues(cards, venue_filters)
+    live_cards = _select_live_cards(cards, race_date, now, args.lookahead_minutes)
+
+    predictions, odds_overrides, skipped = _fetch_live_predictions(
+        cards=live_cards,
+        artifact=artifact,
+        top_k=args.top_k,
+        max_workers=args.max_workers,
+        request_timeout=args.request_timeout,
+        request_max_retries=args.request_max_retries,
+        require_odds=args.require_odds,
+    )
+
+    recommendations = (
+        _build_recommendations(
+            predictions,
+            artifact,
+            betting_policy,
+            odds_overrides=odds_overrides,
+        )
+        if args.with_recommendations
+        else []
+    )
+    race_predictions = [_race_prediction_payload(prediction) for prediction in predictions]
+    output_path = _write_predictions(
+        output_dir=Path(args.output_dir),
+        race_date=race_date,
+        payload={
+            "command": args.command,
+            "config": args.config,
+            "race_date": race_date,
+            "model_name": artifact.get("model_name") if artifact else "baseline_official_card_v1",
+            "generated_at": datetime.now(tz=DEFAULT_TIMEZONE).isoformat(),
+            "model_metrics": artifact.get("metrics") if artifact else {},
+            "betting_policy": betting_policy,
+            "filters": {
+                "venue": venue_filters,
+                "top_k": args.top_k,
+                "lookahead_minutes": args.lookahead_minutes,
+                "require_beforeinfo": True,
+                "require_odds": args.require_odds,
+                "with_recommendations": args.with_recommendations,
+                "now": now.isoformat(),
+            },
+            "candidate_race_count": len(live_cards),
+            "ready_race_count": len(predictions),
+            "skipped_races": skipped,
+            "recommendations": [recommendation.to_dict() for recommendation in recommendations],
+            "race_predictions": race_predictions,
+            "races": [prediction.to_dict() for prediction in predictions],
+        },
+    )
+    print(
+        _format_live_prediction_summary(
+            predictions=predictions,
+            recommendations=recommendations,
+            output_path=output_path,
+            now=now,
+            candidate_race_count=len(live_cards),
+            skipped=skipped,
+        )
+    )
     return 0
 
 
@@ -448,6 +537,21 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--max-race-exposure-fraction", type=float, default=None)
     backtest.add_argument("--daily-stop-loss-yen", type=int, default=None)
     backtest.add_argument("--daily-take-profit-yen", type=int, default=None)
+    backtest.add_argument("--betting-preset", choices=["monthly-roi", "repeated-roi", "structural-roi"], default=None)
+    backtest.add_argument("--min-expected-value", type=float, default=None, help="Override recommendation EV threshold.")
+    backtest.add_argument("--max-per-race", type=int, default=None, help="Override max recommendations per race.")
+    backtest.add_argument("--candidate-pool-size", type=int, default=None, help="Override candidate trifecta pool size.")
+    backtest.add_argument("--min-probability", type=float, default=None, help="Override minimum model probability.")
+    backtest.add_argument("--min-edge", type=float, default=None, help="Override minimum market edge.")
+    backtest.add_argument("--min-market-odds", type=float, default=None, help="Override minimum market odds.")
+    backtest.add_argument("--max-market-odds", type=float, default=None, help="Override maximum market odds.")
+    backtest.add_argument("--min-top-win-probability", type=float, default=None, help="Only keep races where the top win probability exceeds this threshold.")
+    backtest.add_argument("--min-win-margin", type=float, default=None, help="Only keep races where the top-vs-second win probability gap exceeds this threshold.")
+    backtest.add_argument("--required-first-lane", type=int, default=None, help="Only keep combinations with this first-place lane.")
+    backtest.add_argument("--required-second-lane", type=int, default=None, help="Only keep combinations with this second-place lane.")
+    backtest.add_argument("--required-third-lane", type=int, default=None, help="Only keep combinations with this third-place lane.")
+    backtest.add_argument("--allowed-venues", nargs="+", default=None, help="Only keep recommendations from these venue codes or names.")
+    backtest.add_argument("--clear-derived-filters", action="store_true", help="Ignore derived venue and order filters unless they are restated.")
     backtest.add_argument("--output-path", default=None)
     backtest.set_defaults(handler=_backtest_handler)
 
@@ -461,6 +565,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_prediction_arguments(predict_venue, require_venue=True, include_race_no=False)
     predict_venue.set_defaults(handler=_predict_handler)
+
+    predict_live = subparsers.add_parser(
+        "predict-live",
+        help="Predict only upcoming races that already have live beforeinfo available.",
+    )
+    _add_prediction_arguments(predict_live, require_venue=False, include_race_no=False)
+    predict_live.add_argument("--lookahead-minutes", type=int, default=90, help="Only target races whose deadlines are within this many minutes from now.")
+    predict_live.add_argument("--require-odds", action="store_true", help="Skip races unless trifecta odds are already available.")
+    predict_live.add_argument("--with-recommendations", action="store_true", help="Also fetch odds and build recommendation candidates.")
+    predict_live.add_argument("--request-timeout", type=float, default=5.0, help="HTTP timeout seconds per request.")
+    predict_live.add_argument("--request-max-retries", type=int, default=1, help="Retry count per request.")
+    predict_live.add_argument("--now", default=None, help="Optional ISO timestamp override for testing live windows.")
+    predict_live.set_defaults(handler=_predict_live_handler)
 
     note_morning = subparsers.add_parser("note-morning", help="Generate a morning note article from predictions.")
     note_morning.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
@@ -537,23 +654,222 @@ def _resolve_betting_policy(args: argparse.Namespace, config: dict, artifact: di
     policy.update(config.get("betting", {}))
     if artifact and artifact.get("betting_policy"):
         policy.update(artifact["betting_policy"])
-    if artifact and artifact.get("single_day_betting_policy"):
-        policy.update(artifact["single_day_betting_policy"])
-    if args.min_expected_value is not None:
+    override = _betting_policy_override_from_args(args)
+    return merge_betting_policy(
+        policy,
+        override,
+        clear_derived_filters=bool(getattr(args, "clear_derived_filters", False)),
+    )
+
+
+def _betting_policy_override_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    policy: dict[str, Any] = {}
+    preset_name = getattr(args, "betting_preset", None)
+    if preset_name:
+        policy.update(_betting_preset(preset_name))
+    if getattr(args, "min_expected_value", None) is not None:
         policy["min_expected_value"] = args.min_expected_value
-    if args.max_per_race is not None:
+    if getattr(args, "max_per_race", None) is not None:
         policy["max_per_race"] = args.max_per_race
-    if args.candidate_pool_size is not None:
+    if getattr(args, "candidate_pool_size", None) is not None:
         policy["candidate_pool_size"] = args.candidate_pool_size
-    if args.min_probability is not None:
+    if getattr(args, "min_probability", None) is not None:
         policy["min_probability"] = args.min_probability
-    if args.min_edge is not None:
+    if getattr(args, "min_edge", None) is not None:
         policy["min_edge"] = args.min_edge
-    if args.min_market_odds is not None:
+    if getattr(args, "min_market_odds", None) is not None:
         policy["min_market_odds"] = args.min_market_odds
-    if args.max_market_odds is not None:
+    if getattr(args, "max_market_odds", None) is not None:
         policy["max_market_odds"] = args.max_market_odds
+    if getattr(args, "min_top_win_probability", None) is not None:
+        policy["min_top_win_probability"] = args.min_top_win_probability
+    if getattr(args, "min_win_margin", None) is not None:
+        policy["min_win_margin"] = args.min_win_margin
+    if getattr(args, "required_first_lane", None) is not None:
+        policy["required_first_lane"] = args.required_first_lane
+    if getattr(args, "required_second_lane", None) is not None:
+        policy["required_second_lane"] = args.required_second_lane
+    if getattr(args, "required_third_lane", None) is not None:
+        policy["required_third_lane"] = args.required_third_lane
+    allowed_venues = _normalize_allowed_venues(getattr(args, "allowed_venues", None))
+    if allowed_venues:
+        policy["allowed_venues"] = allowed_venues
     return policy
+
+
+def _normalize_allowed_venues(values: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    for value in values or []:
+        for part in str(value).split(","):
+            candidate = part.strip()
+            if not candidate:
+                continue
+            normalized.append(candidate.zfill(2) if candidate.isdigit() else candidate)
+    return normalized
+
+
+def _betting_preset(name: str) -> dict[str, Any]:
+    normalized = str(name or "").strip().lower()
+    if normalized == "monthly-roi":
+        return dict(MONTHLY_ROI_BETTING_POLICY)
+    if normalized == "repeated-roi":
+        return dict(REPEATED_ROI_BETTING_POLICY)
+    if normalized == "structural-roi":
+        return dict(STRUCTURAL_ROI_BETTING_POLICY)
+    raise ValueError(f"Unknown betting preset: {name}")
+
+
+def _resolve_live_now(value: str | None) -> datetime:
+    if value:
+        candidate = datetime.fromisoformat(value)
+        if candidate.tzinfo is None:
+            return candidate.replace(tzinfo=DEFAULT_TIMEZONE)
+        return candidate.astimezone(DEFAULT_TIMEZONE)
+    return datetime.now(tz=DEFAULT_TIMEZONE)
+
+
+def _select_live_cards(
+    cards: list[RaceCard],
+    race_date: str,
+    now: datetime,
+    lookahead_minutes: int,
+) -> list[RaceCard]:
+    horizon = now + timedelta(minutes=max(0, int(lookahead_minutes)))
+    selected: list[RaceCard] = []
+    for card in cards:
+        deadline_dt = _deadline_to_datetime(race_date, card.deadline)
+        if deadline_dt is None:
+            continue
+        if deadline_dt <= now:
+            continue
+        if lookahead_minutes > 0 and deadline_dt > horizon:
+            continue
+        selected.append(card)
+    return sorted(selected, key=lambda item: (_deadline_to_datetime(race_date, item.deadline) or horizon, item.venue_code, item.race_no))
+
+
+def _deadline_to_datetime(race_date: str, deadline: str | None) -> datetime | None:
+    if not deadline:
+        return None
+    return datetime.fromisoformat(f"{restore_race_date(compact_race_date(race_date))}T{deadline}:00+09:00").astimezone(DEFAULT_TIMEZONE)
+
+
+def _fetch_live_predictions(
+    *,
+    cards: list[RaceCard],
+    artifact: dict | None,
+    top_k: int,
+    max_workers: int,
+    request_timeout: float,
+    request_max_retries: int,
+    require_odds: bool,
+) -> tuple[list[RacePrediction], dict[str, dict[str, float]], list[dict[str, Any]]]:
+    if not cards:
+        return [], {}, []
+
+    tasks = list(cards)
+    if len(tasks) == 1 or max_workers <= 1:
+        results = [
+            _fetch_live_prediction(
+                card=card,
+                artifact=artifact,
+                top_k=top_k,
+                request_timeout=request_timeout,
+                request_max_retries=request_max_retries,
+                require_odds=require_odds,
+            )
+            for card in tasks
+        ]
+    else:
+        results = []
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(tasks))) as executor:
+            futures = {
+                executor.submit(
+                    _fetch_live_prediction,
+                    card=card,
+                    artifact=artifact,
+                    top_k=top_k,
+                    request_timeout=request_timeout,
+                    request_max_retries=request_max_retries,
+                    require_odds=require_odds,
+                ): card
+                for card in tasks
+            }
+            for future in as_completed(futures):
+                results.append(future.result())
+
+    predictions: list[RacePrediction] = []
+    odds_overrides: dict[str, dict[str, float]] = {}
+    skipped: list[dict[str, Any]] = []
+    for result in results:
+        if result["prediction"] is None:
+            skipped.append(result["skipped"])
+            continue
+        prediction = result["prediction"]
+        predictions.append(prediction)
+        odds_map = result["odds_map"]
+        if odds_map:
+            odds_overrides[_race_key(prediction.race.date, prediction.race.venue_code, prediction.race.race_no)] = odds_map
+
+    predictions.sort(key=lambda item: (item.race.deadline or "99:99", item.race.venue_code, item.race.race_no))
+    skipped.sort(key=lambda item: (item.get("deadline") or "99:99", item.get("venue_code") or "", item.get("race_no") or 0))
+    return predictions, odds_overrides, skipped
+
+
+def _fetch_live_prediction(
+    *,
+    card: RaceCard,
+    artifact: dict | None,
+    top_k: int,
+    request_timeout: float,
+    request_max_retries: int,
+    require_odds: bool,
+) -> dict[str, Any]:
+    race_key = _race_key(card.date, card.venue_code, card.race_no)
+    client = OfficialBoatraceClient(timeout=request_timeout, max_retries=request_max_retries)
+    try:
+        try:
+            beforeinfo = client.fetch_beforeinfo(card.date, card.venue_code, card.race_no)
+        except Exception:
+            return {
+                "prediction": None,
+                "odds_map": {},
+                "skipped": {
+                    "race_key": race_key,
+                    "venue_code": card.venue_code,
+                    "venue_name": card.venue_name,
+                    "race_no": card.race_no,
+                    "deadline": card.deadline,
+                    "reason": "beforeinfo_unavailable",
+                },
+            }
+
+        odds_map: dict[str, float] = {}
+        if require_odds:
+            try:
+                odds_map = client.fetch_trifecta_odds(card.date, card.venue_code, card.race_no)
+            except Exception:
+                return {
+                    "prediction": None,
+                    "odds_map": {},
+                    "skipped": {
+                        "race_key": race_key,
+                        "venue_code": card.venue_code,
+                        "venue_name": card.venue_name,
+                        "race_no": card.race_no,
+                        "deadline": card.deadline,
+                        "reason": "odds_unavailable",
+                    },
+                }
+    finally:
+        client.close()
+
+    prediction = predict_race_with_model(card, beforeinfo, artifact, top_k=top_k) if artifact else predict_race(card, top_k=top_k)
+    return {
+        "prediction": prediction,
+        "odds_map": odds_map,
+        "skipped": None,
+    }
 
 
 def _fetch_predictions(
@@ -674,14 +990,47 @@ def _format_prediction_summary(
     return "\n".join(lines)
 
 
+def _format_live_prediction_summary(
+    *,
+    predictions: list[RacePrediction],
+    recommendations: list,
+    output_path: Path,
+    now: datetime,
+    candidate_race_count: int,
+    skipped: list[dict[str, Any]],
+) -> str:
+    reason_counts: dict[str, int] = {}
+    for item in skipped:
+        reason = item.get("reason", "unknown")
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
+    lines = [
+        f"Generated live predictions at {now.isoformat()}",
+        f"Candidate races: {candidate_race_count}",
+        f"Ready races: {len(predictions)}",
+        f"Skipped races: {len(skipped)}",
+    ]
+    if reason_counts:
+        summary = ", ".join(f"{reason}={count}" for reason, count in sorted(reason_counts.items()))
+        lines.append(f"Skip reasons: {summary}")
+    lines.append(_format_prediction_summary(predictions, recommendations, output_path))
+    return "\n".join(lines)
+
+
 def _build_recommendations(
     predictions: list[RacePrediction],
     artifact: dict | None,
     betting_policy: dict,
+    odds_overrides: dict[str, dict[str, float]] | None = None,
 ) -> list:
     payout_model = artifact.get("payout_model") if artifact else None
     recommendations = []
-    odds_client = OfficialBoatraceClient()
+    odds_overrides = odds_overrides or {}
+    needs_live_odds = any(
+        _race_key(prediction.race.date, prediction.race.venue_code, prediction.race.race_no) not in odds_overrides
+        for prediction in predictions
+    )
+    odds_client = OfficialBoatraceClient() if needs_live_odds else None
     try:
         for prediction in predictions:
             race = prediction.race
@@ -689,24 +1038,29 @@ def _build_recommendations(
                 entrant.lane: entrant.score
                 for entrant in prediction.entrants
             }
-            try:
-                odds_map = odds_client.fetch_trifecta_odds(race.date, race.venue_code, race.race_no)
-            except Exception:
-                odds_map = {}
+            race_key = _race_key(race.date, race.venue_code, race.race_no)
+            odds_map = odds_overrides.get(race_key)
+            if odds_map is None:
+                try:
+                    odds_map = odds_client.fetch_trifecta_odds(race.date, race.venue_code, race.race_no) if odds_client else {}
+                except Exception:
+                    odds_map = {}
             recommendations.extend(
                 generate_trifecta_recommendations(
-                    race_key=_race_key(race.date, race.venue_code, race.race_no),
+                    race_key=race_key,
                     venue_code=race.venue_code,
                     venue_name=race.venue_name,
                     race_no=race.race_no,
                     lane_probabilities=lane_probabilities,
+                    trifecta_probability_map=prediction.trifecta_probability_map,
                     payout_model=payout_model,
                     odds_map=odds_map,
                     policy=betting_policy,
                 )
             )
     finally:
-        odds_client.close()
+        if odds_client:
+            odds_client.close()
 
     recommendations.sort(
         key=lambda item: (-item.expected_value, -item.probability_ratio, item.race_key, item.combination)
@@ -769,6 +1123,7 @@ def _add_prediction_arguments(
         parser.add_argument("--race-no", type=int, default=None, help="Race number to predict.")
     parser.add_argument("--top-k", type=int, default=5, help="Number of trifecta candidates to keep.")
     parser.add_argument("--max-workers", type=int, default=4, help="Parallel fetch workers.")
+    parser.add_argument("--betting-preset", choices=["monthly-roi", "repeated-roi", "structural-roi"], default=None)
     parser.add_argument("--min-expected-value", type=float, default=None, help="Override recommendation EV threshold.")
     parser.add_argument("--max-per-race", type=int, default=None, help="Override max recommendations per race.")
     parser.add_argument("--candidate-pool-size", type=int, default=None, help="Override candidate trifecta pool size.")
@@ -776,6 +1131,13 @@ def _add_prediction_arguments(
     parser.add_argument("--min-edge", type=float, default=None, help="Override minimum market edge.")
     parser.add_argument("--min-market-odds", type=float, default=None, help="Override minimum market odds.")
     parser.add_argument("--max-market-odds", type=float, default=None, help="Override maximum market odds.")
+    parser.add_argument("--min-top-win-probability", type=float, default=None, help="Only keep races where the top win probability exceeds this threshold.")
+    parser.add_argument("--min-win-margin", type=float, default=None, help="Only keep races where the top-vs-second win probability gap exceeds this threshold.")
+    parser.add_argument("--required-first-lane", type=int, default=None, help="Only keep combinations with this first-place lane.")
+    parser.add_argument("--required-second-lane", type=int, default=None, help="Only keep combinations with this second-place lane.")
+    parser.add_argument("--required-third-lane", type=int, default=None, help="Only keep combinations with this third-place lane.")
+    parser.add_argument("--allowed-venues", nargs="+", default=None, help="Only keep recommendations from these venue codes or names.")
+    parser.add_argument("--clear-derived-filters", action="store_true", help="Ignore derived venue and order filters unless they are restated.")
 
 
 def _parse_race_date(value: str) -> date:

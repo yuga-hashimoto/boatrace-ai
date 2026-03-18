@@ -85,6 +85,8 @@ python -m boatrace_ai backtest --dataset-path data/processed/entrants.csv --raw-
 python -m boatrace_ai predict --race-date 2026-03-10 --min-probability 0.12
 python -m boatrace_ai predict --race-date 2026-03-10 --venue 24 --race-no 12
 python -m boatrace_ai predict-venue --race-date 2026-03-10 --venue 24
+python -m boatrace_ai predict-live --race-date 2026-03-19 --lookahead-minutes 90
+python -m boatrace_ai predict-live --race-date 2026-03-19 --lookahead-minutes 90 --with-recommendations --require-odds
 python -m boatrace_ai note-morning --race-date 2026-03-10
 python -m boatrace_ai note-evening --race-date 2026-03-09
 ```
@@ -98,6 +100,7 @@ python -m boatrace_ai note-evening --race-date 2026-03-09
 `backtest` saves a JSON file under `artifacts/backtests/` and reports holdout metrics plus bankroll simulation for `flat`, `kelly`, and `kelly_capped`.
 `predict` saves a JSON file under `artifacts/predictions/` and prints the top win candidates, leading trifecta combinations, and the highest-EV bets.
 `predict` without `--race-no` already targets all races in the selected venue set, and `predict-venue` makes that venue-wide mode explicit.
+`predict-live` uses the official same-day `B` download to find races whose deadlines are still ahead but close enough to matter, then keeps only races where `beforeinfo` is already available. It caches the day card list under `data/raw/YYYYMMDD/_program_cards.json` so repeated runs can survive transient download failures.
 `note-morning` and `note-evening` write HTML and title text files under `artifacts/note/`.
 
 The current trained path uses official race-card features plus `beforeinfo` features such as exhibition time, tilt, adjusted weight, start display ST, and weather.
