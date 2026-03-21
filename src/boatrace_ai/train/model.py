@@ -25,6 +25,7 @@ from boatrace_ai.betting import (
     MONTHLY_ROI_BETTING_POLICY,
     ROI_FOCUSED_BETTING_POLICY,
     SINGLE_DAY_ROI_BETTING_POLICY,
+    STRUCTURAL_ROI_BETTING_POLICY,
     build_payout_model,
     evaluate_recommendation_strategy,
     iter_betting_policies,
@@ -51,12 +52,15 @@ from boatrace_ai.trifecta import (
 
 DEFAULT_TIMEZONE = ZoneInfo("Asia/Tokyo")
 MAX_TRAINING_DATE_GAP_DAYS = 3
-MAX_POLICY_SELECTION_DATES = 4
+MAX_POLICY_SELECTION_DATES = 7
 MAX_WALK_FORWARD_DATES = 7
 MAX_VENUE_FILTER_CANDIDATES = 4
 MIN_WALK_FORWARD_TRAIN_RACES = 8
 MAX_CALIBRATION_DATES = 60
 LONG_WINDOW_MONTHLY_POLICY_MIN_DATES = 20
+RECENT_PRESET_SELECTION_MIN_DATES = 5
+RECENT_PRESET_LOOKBACK_DATES = 7
+RECENT_PRESET_MIN_ROI = -0.05
 CONSERVATIVE_SINGLE_DAY_POLICY = {
     **DEFAULT_BETTING_POLICY,
     "candidate_pool_size": 1,
@@ -64,6 +68,23 @@ CONSERVATIVE_SINGLE_DAY_POLICY = {
     "min_market_odds": 70.0,
     "max_market_odds": 120.0,
 }
+RECENT_PRESET_CANDIDATES = (
+    dict(STRUCTURAL_ROI_BETTING_POLICY),
+    {
+        **STRUCTURAL_ROI_BETTING_POLICY,
+        "min_probability": 0.04,
+    },
+    {
+        **STRUCTURAL_ROI_BETTING_POLICY,
+        "max_market_odds": 60.0,
+    },
+    {
+        **STRUCTURAL_ROI_BETTING_POLICY,
+        "min_probability": 0.04,
+        "max_market_odds": 60.0,
+    },
+    dict(ROI_FOCUSED_BETTING_POLICY),
+)
 
 
 @dataclass(frozen=True)
@@ -124,6 +145,10 @@ def train_win_model(
     payout_model = build_payout_model(train_rows)
     odds_index = _load_race_odds_index(raw_dir)
     betting_policy = _derive_betting_policy(policy_rows, odds_index=odds_index, random_state=random_state)
+    betting_policy = _attach_fallback_policy(
+        betting_policy,
+        betting_policy.get("fallback_policy"),
+    )
 
     metrics = {
         "train_positive_rate": round(float(np.mean(y_train)), 6),
@@ -554,7 +579,20 @@ def _derive_betting_policy(
         )
         if monthly_override:
             return monthly_override
-        return _apply_venue_filter(walk_forward_policy, walk_forward_contexts)
+        fallback_policy = _select_recent_preset_fallback_policy(
+            unique_dates=unique_dates,
+            fold_contexts=walk_forward_contexts,
+            selected_policy=walk_forward_policy,
+        )
+        recent_override = _select_recent_preset_policy(
+            unique_dates=unique_dates,
+            fold_contexts=walk_forward_contexts,
+            selected_policy=walk_forward_policy,
+        )
+        if recent_override:
+            return _attach_fallback_policy(recent_override, fallback_policy)
+        resolved_policy = _apply_venue_filter(walk_forward_policy, walk_forward_contexts)
+        return _attach_fallback_policy(resolved_policy, fallback_policy)
     if len(unique_dates) >= 3:
         return dict(LOSS_AVOIDANCE_BETTING_POLICY)
 
@@ -723,6 +761,167 @@ def _select_long_window_monthly_policy(
         return None
 
     return dict(MONTHLY_ROI_BETTING_POLICY)
+
+
+def _select_recent_preset_policy(
+    *,
+    unique_dates: list[str],
+    fold_contexts: list[dict[str, Any]],
+    selected_policy: dict[str, Any],
+) -> dict[str, Any] | None:
+    if len(unique_dates) < RECENT_PRESET_SELECTION_MIN_DATES or not fold_contexts:
+        return None
+
+    recent_dates = set(unique_dates[-RECENT_PRESET_LOOKBACK_DATES:])
+    recent_fold_contexts = [
+        fold_context
+        for fold_context in fold_contexts
+        if fold_context.get("fold_date") in recent_dates
+    ]
+    if not recent_fold_contexts:
+        return None
+
+    selected_recent_summary = _summarize_walk_forward_contexts(
+        recent_fold_contexts,
+        selected_policy,
+    )
+    selected_recent_bets = int(selected_recent_summary.get("bets") or 0) if selected_recent_summary else 0
+    selected_recent_active = (
+        policy_summary_is_active_enough(selected_recent_summary)
+        if selected_recent_summary
+        else False
+    )
+    selected_recent_roi = (
+        float(selected_recent_summary.get("roi") or 0.0)
+        if selected_recent_summary and selected_recent_summary.get("roi") is not None
+        else None
+    )
+    selected_recent_score = (
+        score_betting_summary(selected_recent_summary)
+        if selected_recent_summary and selected_recent_summary.get("roi") is not None
+        else (-math.inf,)
+    )
+
+    candidates: list[tuple[dict[str, Any], dict[str, Any], tuple[float, ...]]] = []
+    for preset_policy in RECENT_PRESET_CANDIDATES:
+        for candidate_policy, summary in _iter_policy_candidates_with_venue_filters(
+            preset_policy,
+            recent_fold_contexts,
+        ):
+            if summary.get("bets", 0) == 0 or summary.get("roi") is None:
+                continue
+            candidates.append((candidate_policy, summary, score_betting_summary(summary)))
+
+    if not candidates:
+        return None
+
+    eligible_candidates = [
+        candidate
+        for candidate in candidates
+        if policy_summary_is_active_enough(candidate[1], min_betting_days=1)
+    ] or candidates
+    best_policy, best_summary, _ = max(
+        eligible_candidates,
+        key=lambda item: item[2],
+    )
+
+    best_roi = float(best_summary.get("roi") or 0.0)
+    best_hits = int(best_summary.get("hits") or 0)
+    best_score = score_betting_summary(best_summary)
+    if best_hits <= 0 or best_roi < RECENT_PRESET_MIN_ROI:
+        return None
+
+    if best_score > selected_recent_score:
+        return dict(best_policy)
+
+    if not selected_recent_active:
+        return dict(best_policy)
+
+    if selected_recent_bets == 0 or selected_recent_roi is None:
+        return dict(best_policy)
+
+    if selected_recent_roi <= 0.0 and best_roi > selected_recent_roi:
+        return dict(best_policy)
+
+    return None
+
+
+def _select_recent_preset_fallback_policy(
+    *,
+    unique_dates: list[str],
+    fold_contexts: list[dict[str, Any]],
+    selected_policy: dict[str, Any],
+) -> dict[str, Any] | None:
+    if len(unique_dates) < RECENT_PRESET_SELECTION_MIN_DATES or not fold_contexts:
+        return None
+
+    recent_dates = set(unique_dates[-RECENT_PRESET_LOOKBACK_DATES:])
+    recent_fold_contexts = [
+        fold_context
+        for fold_context in fold_contexts
+        if fold_context.get("fold_date") in recent_dates
+    ]
+    if not recent_fold_contexts:
+        return None
+
+    candidates: list[tuple[dict[str, Any], dict[str, Any], tuple[float, ...]]] = []
+    for preset_policy in RECENT_PRESET_CANDIDATES:
+        for candidate_policy, summary in _iter_policy_candidates_with_venue_filters(
+            preset_policy,
+            recent_fold_contexts,
+        ):
+            if summary.get("bets", 0) == 0 or summary.get("roi") is None:
+                continue
+            if candidate_policy == selected_policy:
+                continue
+            candidates.append((candidate_policy, summary, score_betting_summary(summary)))
+
+    if not candidates:
+        return None
+
+    eligible_candidates = [
+        candidate
+        for candidate in candidates
+        if policy_summary_is_active_enough(candidate[1], min_betting_days=1)
+    ] or candidates
+    best_policy, best_summary, best_score = max(
+        eligible_candidates,
+        key=lambda item: item[2],
+    )
+
+    best_hits = int(best_summary.get("hits") or 0)
+    best_roi = float(best_summary.get("roi") or 0.0)
+    if best_hits <= 0 or best_roi < RECENT_PRESET_MIN_ROI:
+        return None
+
+    return dict(best_policy)
+
+
+def _attach_fallback_policy(
+    policy: dict[str, Any],
+    fallback_policy: dict[str, Any] | None,
+) -> dict[str, Any]:
+    resolved = dict(policy)
+    resolved_fallback = dict(fallback_policy) if fallback_policy else None
+    if resolved_fallback and resolved_fallback != resolved:
+        resolved["fallback_policy"] = resolved_fallback
+        return resolved
+
+    if _should_attach_structural_fallback(resolved):
+        resolved["fallback_policy"] = dict(STRUCTURAL_ROI_BETTING_POLICY)
+    return resolved
+
+
+def _should_attach_structural_fallback(policy: dict[str, Any]) -> bool:
+    if policy.get("fallback_policy"):
+        return False
+    if policy.get("allowed_venues"):
+        return True
+    if float(policy.get("min_probability", 0.0) or 0.0) >= 0.2:
+        return True
+    if float(policy.get("min_market_odds", 0.0) or 0.0) >= 50.0:
+        return True
+    return False
 
 
 def _split_rows_for_policy_selection(

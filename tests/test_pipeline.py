@@ -26,9 +26,12 @@ from boatrace_ai.evaluate.backtest import run_holdout_backtest
 from boatrace_ai.features.dataset import build_dataset
 from boatrace_ai.predict.model import predict_race_with_model
 from boatrace_ai.train.model import (
+    _attach_fallback_policy,
     _filter_rows_by_complete_groups,
     _load_race_odds_index,
     _select_long_window_monthly_policy,
+    _select_recent_preset_fallback_policy,
+    _select_recent_preset_policy,
     _select_betting_policy_walk_forward,
     _select_policy_training_rows,
     _select_recent_training_rows,
@@ -759,6 +762,104 @@ def test_select_long_window_monthly_policy_prefers_monthly_roi():
     assert override["required_first_lane"] == 1
     assert override["required_second_lane"] == 4
     assert override["required_third_lane"] == 6
+
+
+def test_select_recent_preset_policy_prefers_structural_when_current_policy_is_inactive():
+    fold_contexts = []
+    for day, actual_key, payout in [
+        ("2026-03-13", "1-2-3", 410),
+        ("2026-03-14", "1-4-3", 0),
+        ("2026-03-15", "1-4-3", 0),
+        ("2026-03-16", "1-4-3", 0),
+    ]:
+        fold_contexts.append(
+            {
+                "fold_date": day,
+                "validation_races": [
+                    {
+                        "race_key": f"{day}_24_01",
+                        "date": day,
+                        "venue_code": "24",
+                        "venue_name": "大村",
+                        "race_no": 1,
+                        "lane_probabilities": {1: 0.62, 2: 0.18, 3: 0.08, 4: 0.05, 5: 0.04, 6: 0.03},
+                        "trifecta_probability_map": {"1-2-3": 0.08, "1-4-3": 0.04},
+                        "odds_map": {"1-2-3": 35.0, "1-4-3": 30.0},
+                        "actual_trifecta_key": actual_key,
+                        "actual_trifecta_payout_yen": payout,
+                    }
+                ],
+                "payout_model": None,
+            }
+        )
+
+    override = _select_recent_preset_policy(
+        unique_dates=["2026-03-12", "2026-03-13", "2026-03-14", "2026-03-15", "2026-03-16"],
+        fold_contexts=fold_contexts,
+        selected_policy=LOSS_AVOIDANCE_BETTING_POLICY,
+    )
+
+    assert override is not None
+    assert override["required_second_lane"] == 2
+    assert override["required_third_lane"] == 3
+
+
+def test_select_recent_preset_fallback_policy_returns_structural_backup():
+    fold_contexts = []
+    for day, actual_key, payout in [
+        ("2026-03-13", "1-2-3", 410),
+        ("2026-03-14", "1-4-3", 0),
+        ("2026-03-15", "1-4-3", 0),
+        ("2026-03-16", "1-4-3", 0),
+    ]:
+        fold_contexts.append(
+            {
+                "fold_date": day,
+                "validation_races": [
+                    {
+                        "race_key": f"{day}_24_01",
+                        "date": day,
+                        "venue_code": "24",
+                        "venue_name": "大村",
+                        "race_no": 1,
+                        "lane_probabilities": {1: 0.62, 2: 0.18, 3: 0.08, 4: 0.05, 5: 0.04, 6: 0.03},
+                        "trifecta_probability_map": {"1-2-3": 0.08, "1-4-3": 0.04},
+                        "odds_map": {"1-2-3": 35.0, "1-4-3": 30.0},
+                        "actual_trifecta_key": actual_key,
+                        "actual_trifecta_payout_yen": payout,
+                    }
+                ],
+                "payout_model": None,
+            }
+        )
+
+    fallback = _select_recent_preset_fallback_policy(
+        unique_dates=["2026-03-12", "2026-03-13", "2026-03-14", "2026-03-15", "2026-03-16"],
+        fold_contexts=fold_contexts,
+        selected_policy=LOSS_AVOIDANCE_BETTING_POLICY,
+    )
+
+    assert fallback is not None
+    assert fallback["required_second_lane"] == 2
+    assert fallback["required_third_lane"] == 3
+
+
+def test_attach_fallback_policy_adds_structural_backup_for_restrictive_policy():
+    resolved = _attach_fallback_policy(
+        {
+            "min_expected_value": 1.0,
+            "max_per_race": 1,
+            "candidate_pool_size": 1,
+            "min_probability": 0.25,
+            "min_market_odds": 0.0,
+            "allowed_venues": ["15", "20"],
+        },
+        None,
+    )
+
+    assert "fallback_policy" in resolved
+    assert resolved["fallback_policy"]["required_second_lane"] == 2
+    assert resolved["fallback_policy"]["required_third_lane"] == 3
 
 
 def test_select_policy_training_rows_uses_full_history_for_long_holdout():

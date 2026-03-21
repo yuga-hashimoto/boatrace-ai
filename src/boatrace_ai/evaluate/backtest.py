@@ -18,6 +18,7 @@ from boatrace_ai.calibration import apply_probability_calibration
 from boatrace_ai.features.dataset import FEATURE_COLUMNS, rows_to_matrix
 from boatrace_ai.train.model import (
     MAX_POLICY_SELECTION_DATES,
+    _attach_fallback_policy,
     _build_race_probability_records,
     _derive_betting_policy,
     _evaluate_predictions,
@@ -136,6 +137,10 @@ def run_holdout_backtest(
             policy_rows,
             odds_index=odds_index,
             random_state=random_state,
+        )
+        betting_policy = _attach_fallback_policy(
+            betting_policy,
+            betting_policy.get("fallback_policy"),
         )
     betting_policy = merge_betting_policy(
         betting_policy,

@@ -308,6 +308,42 @@ def test_resolve_betting_policy_uses_monthly_roi_preset():
     assert policy["candidate_pool_size"] == 12
 
 
+def test_resolve_betting_policy_attaches_structural_fallback_for_restrictive_artifact():
+    args = SimpleNamespace(
+        min_expected_value=None,
+        betting_preset=None,
+        max_per_race=None,
+        candidate_pool_size=None,
+        min_probability=None,
+        min_edge=None,
+        min_market_odds=None,
+        max_market_odds=None,
+        min_top_win_probability=None,
+        min_win_margin=None,
+        required_first_lane=None,
+        required_second_lane=None,
+        required_third_lane=None,
+        allowed_venues=None,
+        clear_derived_filters=False,
+    )
+
+    policy = _resolve_betting_policy(
+        args,
+        config={},
+        artifact={
+            "betting_policy": {
+                "min_probability": 0.25,
+                "candidate_pool_size": 1,
+                "allowed_venues": ["15", "20"],
+            }
+        },
+    )
+
+    assert "fallback_policy" in policy
+    assert policy["fallback_policy"]["required_second_lane"] == 2
+    assert policy["fallback_policy"]["required_third_lane"] == 3
+
+
 def test_import_db_command_accepts_filters():
     parser = build_parser()
     args = parser.parse_args(
@@ -438,6 +474,36 @@ def test_predict_live_command_accepts_live_filters():
     assert args.now == "2026-03-19T08:00:00+09:00"
 
 
+def test_report_live_command_accepts_report_options():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "report-live",
+            "--race-date",
+            "2026-03-19",
+            "--lookahead-minutes",
+            "60",
+            "--state-path",
+            "artifacts/reports/live_report_state.json",
+            "--result-max-workers",
+            "2",
+            "--upcoming-limit",
+            "3",
+            "--settled-limit",
+            "7",
+            "--quiet-when-empty",
+        ]
+    )
+
+    assert args.command == "report-live"
+    assert args.lookahead_minutes == 60
+    assert args.state_path == "artifacts/reports/live_report_state.json"
+    assert args.result_max_workers == 2
+    assert args.upcoming_limit == 3
+    assert args.settled_limit == 7
+    assert args.quiet_when_empty is True
+
+
 def test_select_live_cards_keeps_only_future_window():
     now = cli._resolve_live_now("2026-03-19T08:00:00+09:00")
     cards = [
@@ -501,3 +567,39 @@ def test_predict_live_handler_uses_ready_races(monkeypatch, tmp_path: Path):
     )
 
     assert exit_code == 0
+
+
+def test_report_live_handler_prints_report(monkeypatch, tmp_path: Path, capsys):
+    monkeypatch.setattr(
+        cli,
+        "_run_live_prediction_job",
+        lambda args, config: {
+            "race_date": "2026-03-19",
+            "payload": {
+                "command": "report-live",
+                "recommendations": [],
+                "race_predictions": [],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "generate_live_report_message",
+        lambda **kwargs: ("【直前予想】\n大村11R 1-2-3 @12.3倍", {"upcoming_count": 1, "settled_count": 0}),
+    )
+
+    exit_code = cli.main(
+        [
+            "report-live",
+            "--race-date",
+            "2026-03-19",
+            "--output-dir",
+            str(tmp_path),
+            "--state-path",
+            str(tmp_path / "state.json"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "大村11R" in captured.out

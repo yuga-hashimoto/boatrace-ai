@@ -27,8 +27,14 @@ from boatrace_ai.note.evening import generate_evening_note
 from boatrace_ai.note.morning import generate_morning_note
 from boatrace_ai.predict.baseline import RacePrediction, predict_race
 from boatrace_ai.predict.model import predict_race_with_model
+from boatrace_ai.report.live import generate_live_report_message
 from boatrace_ai.store.sqlite import import_race_records_to_db
-from boatrace_ai.train.model import find_latest_model, load_model_artifact, train_win_model
+from boatrace_ai.train.model import (
+    _attach_fallback_policy,
+    find_latest_model,
+    load_model_artifact,
+    train_win_model,
+)
 
 
 DEFAULT_CONFIG_PATH = Path("configs/base.json")
@@ -310,12 +316,48 @@ def _predict_handler(args: argparse.Namespace) -> int:
 
 
 def _predict_live_handler(args: argparse.Namespace) -> int:
+    run = _run_live_prediction_job(args, _load_config(Path(args.config)))
+    print(
+        _format_live_prediction_summary(
+            predictions=run["predictions"],
+            recommendations=run["recommendations"],
+            output_path=run["output_path"],
+            now=run["now"],
+            candidate_race_count=run["candidate_race_count"],
+            skipped=run["skipped"],
+        )
+    )
+    return 0
+
+
+def _report_live_handler(args: argparse.Namespace) -> int:
     config = _load_config(Path(args.config))
+    args.with_recommendations = True
+    args.require_odds = True
+    run = _run_live_prediction_job(args, config)
+    output_dir = Path(args.output_dir)
+    message, summary = generate_live_report_message(
+        race_date=run["race_date"],
+        current_payload=run["payload"],
+        prediction_dir=output_dir,
+        state_path=Path(args.state_path),
+        result_max_workers=args.result_max_workers,
+        upcoming_limit=args.upcoming_limit,
+        settled_limit=args.settled_limit,
+        quiet_when_empty=args.quiet_when_empty,
+    )
+    if message:
+        print(message)
+    return 0
+
+
+def _run_live_prediction_job(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
     race_date = _resolve_race_date(args.race_date, config)
     venue_filters = args.venue or config.get("inference", {}).get("venues", [])
     artifact = _load_prediction_artifact(args.model_path, config)
     betting_policy = _resolve_betting_policy(args, config, artifact)
     now = _resolve_live_now(getattr(args, "now", None))
+    output_dir = Path(args.output_dir)
     cache_path = Path(config.get("paths", {}).get("raw_dir", "data/raw")) / compact_race_date(race_date) / "_program_cards.json"
 
     cards = fetch_program_cards_from_official_download(
@@ -347,45 +389,45 @@ def _predict_live_handler(args: argparse.Namespace) -> int:
         else []
     )
     race_predictions = [_race_prediction_payload(prediction) for prediction in predictions]
-    output_path = _write_predictions(
-        output_dir=Path(args.output_dir),
-        race_date=race_date,
-        payload={
-            "command": args.command,
-            "config": args.config,
-            "race_date": race_date,
-            "model_name": artifact.get("model_name") if artifact else "baseline_official_card_v1",
-            "generated_at": datetime.now(tz=DEFAULT_TIMEZONE).isoformat(),
-            "model_metrics": artifact.get("metrics") if artifact else {},
-            "betting_policy": betting_policy,
-            "filters": {
-                "venue": venue_filters,
-                "top_k": args.top_k,
-                "lookahead_minutes": args.lookahead_minutes,
-                "require_beforeinfo": True,
-                "require_odds": args.require_odds,
-                "with_recommendations": args.with_recommendations,
-                "now": now.isoformat(),
-            },
-            "candidate_race_count": len(live_cards),
-            "ready_race_count": len(predictions),
-            "skipped_races": skipped,
-            "recommendations": [recommendation.to_dict() for recommendation in recommendations],
-            "race_predictions": race_predictions,
-            "races": [prediction.to_dict() for prediction in predictions],
+    payload = {
+        "command": args.command,
+        "config": args.config,
+        "race_date": race_date,
+        "model_name": artifact.get("model_name") if artifact else "baseline_official_card_v1",
+        "generated_at": datetime.now(tz=DEFAULT_TIMEZONE).isoformat(),
+        "model_metrics": artifact.get("metrics") if artifact else {},
+        "betting_policy": betting_policy,
+        "filters": {
+            "venue": venue_filters,
+            "top_k": args.top_k,
+            "lookahead_minutes": args.lookahead_minutes,
+            "require_beforeinfo": True,
+            "require_odds": args.require_odds,
+            "with_recommendations": args.with_recommendations,
+            "now": now.isoformat(),
         },
+        "candidate_race_count": len(live_cards),
+        "ready_race_count": len(predictions),
+        "skipped_races": skipped,
+        "recommendations": [recommendation.to_dict() for recommendation in recommendations],
+        "race_predictions": race_predictions,
+        "races": [prediction.to_dict() for prediction in predictions],
+    }
+    output_path = _write_predictions(
+        output_dir=output_dir,
+        race_date=race_date,
+        payload=payload,
     )
-    print(
-        _format_live_prediction_summary(
-            predictions=predictions,
-            recommendations=recommendations,
-            output_path=output_path,
-            now=now,
-            candidate_race_count=len(live_cards),
-            skipped=skipped,
-        )
-    )
-    return 0
+    return {
+        "race_date": race_date,
+        "payload": payload,
+        "output_path": output_path,
+        "predictions": predictions,
+        "recommendations": recommendations,
+        "now": now,
+        "candidate_race_count": len(live_cards),
+        "skipped": skipped,
+    }
 
 
 def _note_morning_handler(args: argparse.Namespace) -> int:
@@ -579,6 +621,22 @@ def build_parser() -> argparse.ArgumentParser:
     predict_live.add_argument("--now", default=None, help="Optional ISO timestamp override for testing live windows.")
     predict_live.set_defaults(handler=_predict_live_handler)
 
+    report_live = subparsers.add_parser(
+        "report-live",
+        help="Generate a chat-friendly live report with current bets and newly settled outcomes.",
+    )
+    _add_prediction_arguments(report_live, require_venue=False, include_race_no=False)
+    report_live.add_argument("--lookahead-minutes", type=int, default=90, help="Only target races whose deadlines are within this many minutes from now.")
+    report_live.add_argument("--request-timeout", type=float, default=5.0, help="HTTP timeout seconds per request.")
+    report_live.add_argument("--request-max-retries", type=int, default=1, help="Retry count per request.")
+    report_live.add_argument("--now", default=None, help="Optional ISO timestamp override for testing live windows.")
+    report_live.add_argument("--state-path", default="artifacts/reports/live_report_state.json", help="State file used to suppress duplicate settled result notifications.")
+    report_live.add_argument("--result-max-workers", type=int, default=4, help="Parallel fetch workers for settled result checks.")
+    report_live.add_argument("--upcoming-limit", type=int, default=5, help="Max current recommendations or top predictions to print.")
+    report_live.add_argument("--settled-limit", type=int, default=10, help="Max newly settled recommendation outcomes to print.")
+    report_live.add_argument("--quiet-when-empty", action="store_true", help="Print nothing when there is no new bet or settled result to report.")
+    report_live.set_defaults(handler=_report_live_handler)
+
     note_morning = subparsers.add_parser("note-morning", help="Generate a morning note article from predictions.")
     note_morning.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
     note_morning.add_argument("--race-date", default=None)
@@ -655,10 +713,14 @@ def _resolve_betting_policy(args: argparse.Namespace, config: dict, artifact: di
     if artifact and artifact.get("betting_policy"):
         policy.update(artifact["betting_policy"])
     override = _betting_policy_override_from_args(args)
-    return merge_betting_policy(
+    resolved_policy = merge_betting_policy(
         policy,
         override,
         clear_derived_filters=bool(getattr(args, "clear_derived_filters", False)),
+    )
+    return _attach_fallback_policy(
+        resolved_policy,
+        resolved_policy.get("fallback_policy"),
     )
 
 
