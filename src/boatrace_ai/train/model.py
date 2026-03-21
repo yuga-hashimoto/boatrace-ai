@@ -894,7 +894,19 @@ def _select_recent_preset_fallback_policy(
     if best_hits <= 0 or best_roi < RECENT_PRESET_MIN_ROI:
         return None
 
-    return dict(best_policy)
+    resolved_policy = _canonicalize_recent_fallback_policy(best_policy)
+    # Fallback works best as a broad rescue path; venue filters overfit quickly.
+    resolved_policy.pop("allowed_venues", None)
+    return resolved_policy
+
+
+def _canonicalize_recent_fallback_policy(policy: dict[str, Any]) -> dict[str, Any]:
+    if (
+        int(policy.get("required_second_lane") or 0) == 2
+        and int(policy.get("required_third_lane") or 0) == 3
+    ):
+        return dict(STRUCTURAL_ROI_BETTING_POLICY)
+    return dict(policy)
 
 
 def _attach_fallback_policy(

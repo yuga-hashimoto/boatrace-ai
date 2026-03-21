@@ -842,6 +842,8 @@ def test_select_recent_preset_fallback_policy_returns_structural_backup():
     assert fallback is not None
     assert fallback["required_second_lane"] == 2
     assert fallback["required_third_lane"] == 3
+    assert "allowed_venues" not in fallback
+    assert fallback["max_market_odds"] == 40.0
 
 
 def test_attach_fallback_policy_adds_structural_backup_for_restrictive_policy():
