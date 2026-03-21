@@ -35,7 +35,7 @@ STRUCTURAL_ROI_BETTING_POLICY = {
     "min_expected_value": 1.0,
     "max_per_race": 1,
     "candidate_pool_size": 1,
-    "min_probability": 0.075,
+    "min_probability": 0.09,
     "min_edge": 0.0,
     "min_market_odds": 20.0,
     "max_market_odds": 40.0,
