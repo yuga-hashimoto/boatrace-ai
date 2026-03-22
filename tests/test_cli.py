@@ -306,6 +306,8 @@ def test_resolve_betting_policy_uses_monthly_roi_preset():
     assert policy["required_second_lane"] == 4
     assert policy["required_third_lane"] == 6
     assert policy["candidate_pool_size"] == 12
+    assert policy["min_probability"] == 0.04
+    assert policy["max_market_odds"] == 80.0
 
 
 def test_resolve_betting_policy_attaches_structural_fallback_for_restrictive_artifact():

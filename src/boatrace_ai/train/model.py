@@ -756,8 +756,23 @@ def _select_long_window_monthly_policy(
         fold_contexts,
         selected_policy,
     )
-    selected_roi = float(selected_summary.get("roi") or 0.0) if selected_summary else 0.0
-    if monthly_roi <= selected_roi:
+    if selected_summary:
+        monthly_score = score_betting_summary(monthly_summary)
+        selected_score = score_betting_summary(selected_summary)
+        if monthly_score <= selected_score:
+            return None
+    else:
+        return dict(MONTHLY_ROI_BETTING_POLICY)
+
+    if selected_summary and float(selected_summary.get("roi") or 0.0) >= monthly_roi:
+        # Score already favored monthly here; keep the extra ROI check only as a
+        # tie-breaker against low-signal noise.
+        selected_betting_days = int(selected_summary.get("betting_days") or 0)
+        monthly_betting_days = int(monthly_summary.get("betting_days") or 0)
+        if monthly_betting_days <= selected_betting_days:
+            return None
+
+    if monthly_roi <= 0.0:
         return None
 
     return dict(MONTHLY_ROI_BETTING_POLICY)

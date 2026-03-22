@@ -14,6 +14,7 @@ from boatrace_ai.collect.official import (
 )
 from boatrace_ai.betting import (
     LOSS_AVOIDANCE_BETTING_POLICY,
+    STRUCTURAL_ROI_BETTING_POLICY,
     compare_bankroll_strategies,
     evaluate_recommendation_strategy,
     generate_trifecta_recommendations,
@@ -756,6 +757,52 @@ def test_select_long_window_monthly_policy_prefers_monthly_roi():
         unique_dates=[f"2026-02-{day:02d}" for day in range(1, 21)],
         fold_contexts=fold_contexts,
         selected_policy=LOSS_AVOIDANCE_BETTING_POLICY,
+    )
+
+    assert override is not None
+    assert override["required_first_lane"] == 1
+    assert override["required_second_lane"] == 4
+    assert override["required_third_lane"] == 6
+
+
+def test_select_long_window_monthly_policy_prefers_monthly_score_over_raw_roi(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monthly_summary = {
+        "roi": 1.25,
+        "daily_roi_floor": 1.1,
+        "daily_roi_median": 1.2,
+        "betting_days": 4,
+        "days": 4,
+        "hit_rate": 0.25,
+        "profit": 5000,
+        "bets": 8,
+    }
+    selected_summary = {
+        "roi": 1.4,
+        "daily_roi_floor": 0.8,
+        "daily_roi_median": 1.0,
+        "betting_days": 2,
+        "days": 4,
+        "hit_rate": 0.2,
+        "profit": 5200,
+        "bets": 4,
+    }
+
+    def _fake_summary(_fold_contexts, policy):
+        if policy.get("required_second_lane") == 4 and policy.get("required_third_lane") == 6:
+            return monthly_summary
+        return selected_summary
+
+    monkeypatch.setattr(
+        "boatrace_ai.train.model._summarize_walk_forward_contexts",
+        _fake_summary,
+    )
+
+    override = _select_long_window_monthly_policy(
+        unique_dates=[f"2026-02-{day:02d}" for day in range(1, 21)],
+        fold_contexts=[{"fold_date": "2026-03-01", "validation_races": []}],
+        selected_policy=STRUCTURAL_ROI_BETTING_POLICY,
     )
 
     assert override is not None
