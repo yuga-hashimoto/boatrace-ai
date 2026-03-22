@@ -65,6 +65,7 @@ MONTHLY_ROI_BETTING_POLICY = {
     "required_first_lane": 1,
     "required_second_lane": 4,
     "required_third_lane": 6,
+    "min_top_win_probability": 0.63,
 }
 SINGLE_DAY_ROI_BETTING_POLICY = {
     **DEFAULT_BETTING_POLICY,

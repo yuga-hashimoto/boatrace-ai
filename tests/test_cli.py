@@ -308,6 +308,7 @@ def test_resolve_betting_policy_uses_monthly_roi_preset():
     assert policy["candidate_pool_size"] == 12
     assert policy["min_probability"] == 0.04
     assert policy["max_market_odds"] == 80.0
+    assert policy["min_top_win_probability"] == 0.63
 
 
 def test_resolve_betting_policy_attaches_structural_fallback_for_restrictive_artifact():
