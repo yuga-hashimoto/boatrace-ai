@@ -54,7 +54,7 @@
       "rolling_30d_backtest_file": "backtest_20260330_baseline_30d.json",
       "params_changed": {},
       "odds_refresh_remaining_missing": 1,
-      "notes": "NO IMPROVEMENT. baseline_daily had 0 bets (null ROI) because no race on 2026-03-30 matched the monthly-roi structural 1-4-6 pattern with min_top_win_probability>=0.63. Tried 5 trials using --clear-derived-filters with various min_probability/max_market_odds, all generated bets>=3 daily but 30d ROI was -0.46 to -0.30, far below baseline 30d ROI of 5.9. monthly-roi strategy unchanged."
+      "notes": "NO IMPROVEMENT (2 runs). baseline_daily: 0 bets (null ROI) because no race on 2026-03-30 had required_first_lane=1 candidate. Run 1 (trials 01-05): --clear-derived-filters variants all gave 30d ROI -0.46 to -0.30, far below baseline 5.9. Run 2 (trials 06-10): structural relaxation — trials 06-07 (min_top_win 0.58/0.55, keep 1-4-6 lanes) got 8 bets 30d ROI 5.0375 (worse); trials 08-10 (remove 2nd/3rd lane constraints, min_top_win 0.60-0.70) yielded identical 7 bets 30d ROI 5.9 as baseline (no change). monthly-roi strategy unchanged."
     }
   ]
 }
