@@ -1,0 +1,60 @@
+{
+  "description": "Daily backtest ROI tracking. Each entry records the best recommendation_roi achieved on that date.",
+  "history": [
+    {
+      "date": "2026-03-27",
+      "recommendation_roi": 2.247518,
+      "recommendation_bets": 141,
+      "recommendation_hits": 6,
+      "recommendation_hit_rate": 0.042553,
+      "recommendation_return": 45790,
+      "recommendation_profit": 31690,
+      "betting_preset": "monthly-roi",
+      "backtest_file": "backtest_monthly_roi_recent90d.json",
+      "notes": "Seed entry from existing backtest_monthly_roi_recent90d.json"
+    },
+    {
+      "date": "2026-03-29",
+      "target_date": "2026-03-28",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {},
+      "baseline_daily_roi": null,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": null,
+      "candidate_30d_roi": null,
+      "recommendation_bets": null,
+      "recommendation_hits": null,
+      "recommendation_hit_rate": null,
+      "recommendation_return": null,
+      "recommendation_profit": null,
+      "daily_backtest_file": null,
+      "rolling_30d_backtest_file": null,
+      "params_changed": {},
+      "odds_refresh_remaining_missing": null,
+      "notes": "EXECUTION FAILURE: Python実行が自動スケジュールタスク環境でブロックされました。raw data同期もbacktestも実行できませんでした。最新rawデータは2026-03-26まで。2026-03-28のデータは未取得。次回実行時にPermission設定を確認の上、手動でpython許可を追加してください。"
+    }
+  ,
+    {
+      "date": "2026-03-31",
+      "target_date": "2026-03-30",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {},
+      "baseline_daily_roi": null,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": 5.9,
+      "candidate_30d_roi": null,
+      "recommendation_bets": 0,
+      "recommendation_hits": 0,
+      "recommendation_hit_rate": null,
+      "recommendation_return": 0,
+      "recommendation_profit": 0,
+      "daily_backtest_file": "backtest_20260330_baseline_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260330_baseline_30d.json",
+      "params_changed": {},
+      "odds_refresh_remaining_missing": 1,
+      "notes": "NO IMPROVEMENT. baseline_daily had 0 bets (null ROI) because no race on 2026-03-30 matched the monthly-roi structural 1-4-6 pattern with min_top_win_probability>=0.63. Tried 5 trials using --clear-derived-filters with various min_probability/max_market_odds, all generated bets>=3 daily but 30d ROI was -0.46 to -0.30, far below baseline 30d ROI of 5.9. monthly-roi strategy unchanged."
+    }
+  ]
+}
