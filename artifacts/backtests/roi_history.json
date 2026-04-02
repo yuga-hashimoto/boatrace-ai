@@ -78,5 +78,27 @@
       "odds_refresh_remaining_missing": 1,
       "notes": "NO IMPROVEMENT. baseline_daily: 1 bet, ROI=0.8 (hit). baseline_30d: 7 bets, ROI=-0.742857 (1 hit, return=180 on 700 invested). Trials 01-05 all produced identical results to baseline. Trial 01 (min_top_win=0.60) and Trial 02 (min_top_win=0.55): relaxation had no effect because existing 7 races already pass the original 0.63 threshold. Trial 03 (remove third lane): intended to pass --required-first-lane 1 --required-second-lane 4 without third lane, but CLI behavior keeps preset required_third_lane=6 unless --required-third-lane 0 is explicitly passed. Trial 04 (max_market_odds=50): all 7 bets had odds <= 50 already. Trial 05 (min_probability=0.05): all 7 bets had probability >= 0.05 already. Strategy unchanged. Note: 30d window (2026-03-03 to 2026-04-01) was a losing period for the 1-4-6 lane strategy. To try removing third-lane constraint in future, use --required-third-lane 0."
     }
+  ,
+    {
+      "date": "2026-04-03",
+      "target_date": "2026-04-02",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {},
+      "baseline_daily_roi": null,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": 5.2625,
+      "candidate_30d_roi": null,
+      "recommendation_bets": 0,
+      "recommendation_hits": 0,
+      "recommendation_hit_rate": null,
+      "recommendation_return": 0,
+      "recommendation_profit": 0,
+      "daily_backtest_file": "backtest_20260402_baseline_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260402_baseline_30d.json",
+      "params_changed": {},
+      "odds_refresh_remaining_missing": 13,
+      "notes": "NO IMPROVEMENT. baseline_daily: 0 bets (null ROI) — no race on 2026-04-02 passed 1-4-6 lane + min_top_win=0.63 filters. baseline_30d: 8 bets, ROI=5.2625 (2 hits, 25% hit rate). Trials 01-05: Trial 01 (--required-third-lane 0): daily 8 bets ROI=-1.0, 30d 316 bets ROI=-0.32; Trial 02 (--required-second-lane 0 --required-third-lane 0): daily 15 bets ROI=-1.0, 30d 661 bets ROI=-0.25; Trial 03 (--min-top-win-probability 0.58): still 0 bets daily; Trial 04 (--required-third-lane 0 --min-top-win-probability 0.58): daily 9 bets ROI=-1.0, 30d 431 bets ROI=-0.29; Trial 05 (--required-second-lane 0 --required-third-lane 0 --min-top-win-probability 0.60): daily 18 bets ROI=-1.0, 30d 837 bets ROI=-0.37. All relaxations dramatically worsened 30d ROI from +5.26 to negative. Lane filter 1-4-6 is critical for positive ROI. Strategy unchanged. odds_refresh.remaining_missing=13 (venue 08 data not available)."
+    }
   ]
 }
