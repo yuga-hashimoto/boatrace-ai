@@ -122,5 +122,27 @@
       "odds_refresh_remaining_missing": 13,
       "notes": "NO IMPROVEMENT. baseline_daily: 0 bets (null ROI) — no race on 2026-04-03 passed 1-4-6 lane + min_top_win=0.63 filters. baseline_30d: 7 bets, ROI=-0.742857 (1 hit, return=180 on 700 invested). Trials 01-05 all aimed at tightening filters to reduce losing bets. Trial 01 (min_top_win=0.68): daily 0 bets, 30d 6 bets ROI=-0.70 (marginal improvement). Trial 02 (min_top_win=0.70): same as T01 — daily 0 bets, 30d 6 bets ROI=-0.70. Trial 03 (max_market_odds=50): no change, 30d still 7 bets ROI=-0.742857. Trial 04 (max_market_odds=45): no change, 30d still 7 bets ROI=-0.742857. Trial 05 (min_top_win=0.65 + max_market_odds=55): no change, 30d still 7 bets ROI=-0.742857. Adoption criteria requires 単日 roi > baseline_daily, but all trials produced 0 daily bets (null) same as baseline. Strategy unchanged. Note: T01/T02 show mild 30d improvement (-0.70 vs -0.742857) by filtering 1 marginal bet, but not enough to adopt without daily improvement. odds_refresh.remaining_missing=13 (2026-04-02 venue data 12 missing + 2026-03-30 1 missing)."
     }
+  ,
+    {
+      "date": "2026-04-05",
+      "target_date": "2026-04-04",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {},
+      "baseline_daily_roi": null,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": -0.64,
+      "candidate_30d_roi": null,
+      "recommendation_bets": 0,
+      "recommendation_hits": 0,
+      "recommendation_hit_rate": null,
+      "recommendation_return": 0,
+      "recommendation_profit": 0,
+      "daily_backtest_file": "backtest_20260404_baseline_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260404_baseline_30d.json",
+      "params_changed": {},
+      "odds_refresh_remaining_missing": 25,
+      "notes": "NO IMPROVEMENT. baseline_daily: 0 bets (null ROI) — no race on 2026-04-04 passed 1-4-6 lane + min_top_win=0.63 filters (venue 18 also missing 12 races). baseline_30d: 5 bets, ROI=-0.64 (1 hit, return=180 on 500 invested). Trials 01-05: T01 (min_top_win=0.60): daily 0 bets, 30d same 5 bets ROI=-0.64; T02 (min_top_win=0.58): identical; T03 (min_top_win=0.55): identical; T04 (max_market_odds=55): identical; T05 (min_top_win=0.60+max_market_odds=55): identical. All adjustments to min_top_win_probability and max_market_odds produce exactly same results as baseline — the 1-4-6 lane filter completely dominates which bets are made. Within the 30-day window, only 5 races pass the lane filter regardless of probability/odds adjustments. Strategy unchanged. odds_refresh.remaining_missing=25 (venue 18 data 12 races + prior date 13 missing)."
+    }
   ]
 }
