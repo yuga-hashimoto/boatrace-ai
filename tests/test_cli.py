@@ -136,6 +136,14 @@ def test_backtest_command_accepts_bankroll_options():
             "--allowed-venues",
             "20,16",
             "--clear-derived-filters",
+            "--odds-refresh-max-workers",
+            "2",
+            "--odds-refresh-timeout",
+            "15",
+            "--odds-refresh-retries",
+            "1",
+            "--odds-refresh-backoff-seconds",
+            "0.5",
         ]
     )
 
@@ -155,6 +163,34 @@ def test_backtest_command_accepts_bankroll_options():
     assert args.required_third_lane == 3
     assert args.allowed_venues == ["20,16"]
     assert args.clear_derived_filters is True
+    assert args.refresh_missing_odds is True
+    assert args.odds_refresh_max_workers == 2
+    assert args.odds_refresh_timeout == 15
+    assert args.odds_refresh_retries == 1
+    assert args.odds_refresh_backoff_seconds == 0.5
+
+
+def test_backtest_odds_refresh_dates_include_holdout_and_recent_policy_rows(tmp_path: Path):
+    dataset_path = tmp_path / "entrants.csv"
+    dataset_path.write_text(
+        "\n".join(
+            [
+                "date,race_key,is_win",
+                "2026-03-20,r1,1",
+                "2026-03-20,r1,0",
+                "2026-03-21,r2,1",
+                "2026-03-21,r2,0",
+                "2026-03-22,r3,1",
+                "2026-03-22,r3,0",
+                "2026-03-23,r4,",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    refresh_dates = cli._backtest_odds_refresh_dates(dataset_path, "2026-03-21")
+
+    assert refresh_dates == ["2026-03-20", "2026-03-21", "2026-03-22"]
 
 
 def test_note_morning_command_accepts_race_date():

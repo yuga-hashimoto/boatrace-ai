@@ -30,7 +30,11 @@ from boatrace_ai.predict.model import predict_race_with_model
 from boatrace_ai.report.live import generate_live_report_message
 from boatrace_ai.store.sqlite import import_race_records_to_db
 from boatrace_ai.train.model import (
+    MAX_POLICY_SELECTION_DATES,
+    _load_dataset_rows,
+    _select_recent_training_rows,
     _attach_fallback_policy,
+    _split_rows_by_date,
     find_latest_model,
     load_model_artifact,
     train_win_model,
@@ -200,11 +204,22 @@ def _backtest_handler(args: argparse.Namespace) -> int:
     config = _load_config(Path(args.config))
     dataset_path = Path(args.dataset_path or Path(config.get("paths", {}).get("processed_dir", "data/processed")) / "entrants.csv")
     raw_dir = Path(args.raw_dir or config.get("paths", {}).get("raw_dir", "data/raw"))
+    resolved_train_end_date = args.train_end_date or config.get("dataset", {}).get("train_end_date")
+    odds_refresh_summary = _refresh_backtest_odds(
+        dataset_path=dataset_path,
+        raw_dir=raw_dir,
+        train_end_date=resolved_train_end_date,
+        enabled=args.refresh_missing_odds,
+        max_workers=args.odds_refresh_max_workers,
+        request_timeout=args.odds_refresh_timeout,
+        request_max_retries=args.odds_refresh_retries,
+        request_retry_backoff_seconds=args.odds_refresh_backoff_seconds,
+    )
     risk_management = config.get("risk_management", {})
     result = run_holdout_backtest(
         dataset_path=dataset_path,
         raw_dir=raw_dir,
-        train_end_date=args.train_end_date or config.get("dataset", {}).get("train_end_date"),
+        train_end_date=resolved_train_end_date,
         random_state=int(config.get("model", {}).get("random_state", 42)),
         bankroll_mode=args.bankroll_mode,
         starting_bankroll_yen=args.starting_bankroll_yen,
@@ -254,12 +269,79 @@ def _backtest_handler(args: argparse.Namespace) -> int:
         clear_derived_filters=bool(getattr(args, "clear_derived_filters", False)),
     )
     payload = result.to_dict()
+    payload["odds_refresh"] = odds_refresh_summary
     output_path = Path(args.output_path) if args.output_path else _default_backtest_output_path(config)
     payload["output_path"] = str(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
+
+
+def _backtest_odds_refresh_dates(dataset_path: Path, train_end_date: str | None) -> list[str]:
+    rows = _load_dataset_rows(dataset_path)
+    labeled_rows = [row for row in rows if row.get("is_win") not in ("", None)]
+    if not labeled_rows:
+        return []
+
+    train_rows, test_rows = _split_rows_by_date(labeled_rows, train_end_date)
+    if not test_rows:
+        return []
+
+    recent_policy_rows = _select_recent_training_rows(
+        train_rows,
+        max_dates=MAX_POLICY_SELECTION_DATES,
+    )
+    refresh_dates = {row["date"] for row in test_rows}
+    refresh_dates.update(row["date"] for row in recent_policy_rows)
+    return sorted(refresh_dates)
+
+
+def _refresh_backtest_odds(
+    *,
+    dataset_path: Path,
+    raw_dir: Path,
+    train_end_date: str | None,
+    enabled: bool,
+    max_workers: int,
+    request_timeout: float,
+    request_max_retries: int,
+    request_retry_backoff_seconds: float,
+) -> dict[str, Any]:
+    refresh_dates = _backtest_odds_refresh_dates(dataset_path, train_end_date)
+    summary: dict[str, Any] = {
+        "enabled": enabled,
+        "dates": refresh_dates,
+        "requested_dates": len(refresh_dates),
+        "refreshed_dates": 0,
+        "checked_files": 0,
+        "updated_files": 0,
+        "remaining_missing": 0,
+        "missing_raw_dirs": [],
+        "per_date": [],
+    }
+    if not enabled or not refresh_dates:
+        return summary
+
+    for race_date in refresh_dates:
+        day_dir = raw_dir / compact_race_date(race_date)
+        if not day_dir.exists():
+            summary["missing_raw_dirs"].append(str(day_dir))
+            continue
+        day_summary = refresh_missing_trifecta_odds(
+            input_dir=day_dir,
+            max_workers=max_workers,
+            request_timeout=request_timeout,
+            request_max_retries=request_max_retries,
+            request_retry_backoff_seconds=request_retry_backoff_seconds,
+        )
+        summary["refreshed_dates"] += 1
+        summary["checked_files"] += int(day_summary.get("checked_files", 0))
+        summary["updated_files"] += int(day_summary.get("updated_files", 0))
+        summary["remaining_missing"] += int(day_summary.get("remaining_missing", 0))
+        summary["per_date"].append({"date": race_date, **day_summary})
+
+    return summary
 
 
 def _predict_handler(args: argparse.Namespace) -> int:
@@ -594,6 +676,16 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--required-third-lane", type=int, default=None, help="Only keep combinations with this third-place lane.")
     backtest.add_argument("--allowed-venues", nargs="+", default=None, help="Only keep recommendations from these venue codes or names.")
     backtest.add_argument("--clear-derived-filters", action="store_true", help="Ignore derived venue and order filters unless they are restated.")
+    backtest.add_argument(
+        "--refresh-missing-odds",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Refresh missing trifecta odds for the holdout dates and recent policy-selection dates before running the backtest.",
+    )
+    backtest.add_argument("--odds-refresh-max-workers", type=int, default=4, help="Parallel workers for pre-backtest odds refresh.")
+    backtest.add_argument("--odds-refresh-timeout", type=float, default=20.0, help="HTTP timeout seconds for pre-backtest odds refresh.")
+    backtest.add_argument("--odds-refresh-retries", type=int, default=3, help="Retry count for pre-backtest odds refresh.")
+    backtest.add_argument("--odds-refresh-backoff-seconds", type=float, default=1.0, help="Linear retry backoff seconds for pre-backtest odds refresh.")
     backtest.add_argument("--output-path", default=None)
     backtest.set_defaults(handler=_backtest_handler)
 

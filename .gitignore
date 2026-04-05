@@ -7,9 +7,15 @@ data/raw/*
 data/processed/*
 data/external/*
 artifacts/*
+!artifacts/backtests/
+artifacts/backtests/*
+!artifacts/backtests/roi_history.json
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/external/.gitkeep
+
+logs/*.log
+!logs/.gitkeep
 
 *.pyc
 *.pyo
