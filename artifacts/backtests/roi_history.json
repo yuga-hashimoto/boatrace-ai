@@ -144,5 +144,27 @@
       "odds_refresh_remaining_missing": 25,
       "notes": "NO IMPROVEMENT. baseline_daily: 0 bets (null ROI) — no race on 2026-04-04 passed 1-4-6 lane + min_top_win=0.63 filters (venue 18 also missing 12 races). baseline_30d: 5 bets, ROI=-0.64 (1 hit, return=180 on 500 invested). Trials 01-05: T01 (min_top_win=0.60): daily 0 bets, 30d same 5 bets ROI=-0.64; T02 (min_top_win=0.58): identical; T03 (min_top_win=0.55): identical; T04 (max_market_odds=55): identical; T05 (min_top_win=0.60+max_market_odds=55): identical. All adjustments to min_top_win_probability and max_market_odds produce exactly same results as baseline — the 1-4-6 lane filter completely dominates which bets are made. Within the 30-day window, only 5 races pass the lane filter regardless of probability/odds adjustments. Strategy unchanged. odds_refresh.remaining_missing=25 (venue 18 data 12 races + prior date 13 missing)."
     }
+  ,
+    {
+      "date": "2026-04-06",
+      "target_date": "2026-04-05",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {},
+      "baseline_daily_roi": null,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": 3.554545,
+      "candidate_30d_roi": null,
+      "recommendation_bets": 0,
+      "recommendation_hits": 0,
+      "recommendation_hit_rate": null,
+      "recommendation_return": 0,
+      "recommendation_profit": 0,
+      "daily_backtest_file": "backtest_20260405_baseline_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260405_baseline_30d.json",
+      "params_changed": {},
+      "odds_refresh_remaining_missing": 25,
+      "notes": "NO IMPROVEMENT. baseline_daily: 0 bets (null ROI) — no race on 2026-04-05 passed 1-4-6 lane + min_top_win=0.63 filters. baseline_30d: 11 bets, ROI=3.554545 (2 hits, 18.2% hit rate). Trials 01-05: T01 (min_top_win=0.60): daily 1 bet ROI=-1.0 (lost); T02 (min_top_win=0.55): daily 1 bet ROI=-1.0 (same bet, lost); T03 (required_third_lane=0): daily 11 bets ROI=-0.818182 (1 hit, 9 losses — consistent with historical pattern of lane relaxation hurting ROI); T04 (max_market_odds=50): 0 bets, no change; T05 (min_top_win=0.60+max_market_odds=55): 1 bet ROI=-1.0 (same as T01). All trials with bets had negative single-day ROI. 30d baseline is healthy at ROI=3.55, not run for trials to avoid risk of degradation (historical pattern: lane relaxation → negative 30d ROI). Strategy unchanged. odds_refresh.remaining_missing=25 (2026-04-02 venue 12 missing + 2026-04-04 venue 12 missing + prior 1 missing)."
+    }
   ]
 }
