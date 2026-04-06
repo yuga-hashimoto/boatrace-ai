@@ -1,0 +1,10 @@
+{
+  "strategy_name": "monthly-roi",
+  "betting_preset": "monthly-roi",
+  "overrides": {
+    "required_third_lane": 0,
+    "min_top_win_probability": 0.65
+  },
+  "adopted_on": "2026-04-06",
+  "notes": "Adopted 2026-04-06: required_third_lane=0 + min_top_win=0.65. Baseline 30d was -0.85 (12 bets, strict 1-4-6). Trial improved daily ROI from -1.0 to 4.90 (7 bets, 2 hits) and 30d ROI from -0.85 to -0.0623 (284 bets, 14 hits). First adoption of lane relaxation — 3rd lane constraint removed. Monitor for stability in future runs before promoting to permanent config."
+}

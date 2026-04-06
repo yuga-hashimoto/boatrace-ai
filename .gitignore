@@ -10,6 +10,7 @@ artifacts/*
 !artifacts/backtests/
 artifacts/backtests/*
 !artifacts/backtests/roi_history.json
+!artifacts/backtests/strategy_state.json
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/external/.gitkeep

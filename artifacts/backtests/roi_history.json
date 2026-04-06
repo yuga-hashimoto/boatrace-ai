@@ -166,5 +166,33 @@
       "odds_refresh_remaining_missing": 25,
       "notes": "NO IMPROVEMENT. baseline_daily: 0 bets (null ROI) — no race on 2026-04-05 passed 1-4-6 lane + min_top_win=0.63 filters. baseline_30d: 11 bets, ROI=3.554545 (2 hits, 18.2% hit rate). Trials 01-05: T01 (min_top_win=0.60): daily 1 bet ROI=-1.0 (lost); T02 (min_top_win=0.55): daily 1 bet ROI=-1.0 (same bet, lost); T03 (required_third_lane=0): daily 11 bets ROI=-0.818182 (1 hit, 9 losses — consistent with historical pattern of lane relaxation hurting ROI); T04 (max_market_odds=50): 0 bets, no change; T05 (min_top_win=0.60+max_market_odds=55): 1 bet ROI=-1.0 (same as T01). All trials with bets had negative single-day ROI. 30d baseline is healthy at ROI=3.55, not run for trials to avoid risk of degradation (historical pattern: lane relaxation → negative 30d ROI). Strategy unchanged. odds_refresh.remaining_missing=25 (2026-04-02 venue 12 missing + 2026-04-04 venue 12 missing + prior 1 missing)."
     }
+  ,
+    {
+      "date": "2026-04-07",
+      "target_date": "2026-04-06",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.65
+      },
+      "baseline_daily_roi": -1.0,
+      "candidate_daily_roi": 4.9,
+      "baseline_30d_roi": -0.85,
+      "candidate_30d_roi": -0.062324,
+      "recommendation_bets": 7,
+      "recommendation_hits": 2,
+      "recommendation_hit_rate": 0.285714,
+      "recommendation_return": 4130,
+      "recommendation_profit": 3430,
+      "daily_backtest_file": "backtest_20260406_trial_02_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260406_trial_02_30d.json",
+      "params_changed": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.65
+      },
+      "odds_refresh_remaining_missing": 25,
+      "notes": "IMPROVEMENT ADOPTED. required_third_lane=0 + min_top_win_probability=0.65. Daily ROI improved from -1.0 to 4.90 (7 bets, 2 hits, profit=3430). 30d ROI improved from -0.85 to -0.0623 (284 bets, 14 hits, profit=-1770). Baseline strict 1-4-6 had only 12 bets in 30d period and was deeply negative. Removing 3rd lane constraint while tightening min_top_win=0.65 significantly increases bet count while improving quality. First adoption of lane relaxation — monitor for stability before permanent config change. odds_refresh.remaining_missing=25 (2026-04-02 venue 12 + 2026-04-04 venue 12 + prior 1)."
+    }
   ]
 }
