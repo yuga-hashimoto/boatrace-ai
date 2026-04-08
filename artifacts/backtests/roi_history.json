@@ -219,5 +219,30 @@
       "odds_refresh_remaining_missing": 24,
       "notes": "NO IMPROVEMENT. baseline_daily: 5 bets, ROI=-1.0 (0 hits). baseline_30d: 245 bets, ROI=-0.3086 (12 hits, 4.9% hit rate). Trials 01-05 all had daily ROI=-1.0 (0 hits), failing the 単日 ROI > baseline condition. T01 (min_top_win=0.70): daily 3 bets ROI=-1.0, 30d 116 bets ROI=+0.1552 — significant 30d improvement but daily test fails. T02 (min_top_win=0.68): daily 5 bets ROI=-1.0, 30d 164 bets ROI=+0.0329 — moderate 30d improvement but daily fails. T03 (max_odds=50): daily 5 bets ROI=-1.0, 30d 233 bets ROI=-0.3442 — both worse. T04 (min_ev=0.15): identical to baseline. T05 (required_second_lane=4): identical to baseline. Key observation: T01 (min_top_win=0.70) shows promise with 30d ROI turning positive (+0.155 vs -0.309), cutting bets by 53% while retaining 10/12 hits. Monitor this pattern — if it repeats over next 1-2 days with positive daily ROI, consider adopting min_top_win=0.70. Strategy unchanged. odds_refresh.remaining_missing=24 (2026-04-04 venue 12 + prior 12 missing)."
     }
+  ,
+    {
+      "date": "2026-04-09",
+      "target_date": "2026-04-08",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.65
+      },
+      "baseline_daily_roi": -1.0,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": 0.235169,
+      "candidate_30d_roi": null,
+      "recommendation_bets": 6,
+      "recommendation_hits": 0,
+      "recommendation_hit_rate": 0.0,
+      "recommendation_return": 0,
+      "recommendation_profit": -600,
+      "daily_backtest_file": "backtest_20260408_baseline_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260408_baseline_30d.json",
+      "params_changed": {},
+      "odds_refresh_remaining_missing": 25,
+      "notes": "NO IMPROVEMENT. baseline_daily: 6 bets, ROI=-1.0 (0 hits). baseline_30d: 236 bets, ROI=+0.235169 (16 hits, 6.8% hit rate, profit=+5550) — now positive! Trials 01-05 all had daily ROI=-1.0 (0 hits), failing the 単日 ROI > baseline condition. T01 (min_top_win=0.70): daily 3 bets ROI=-1.0, 30d 121 bets ROI=-0.0661 — 30d worse than baseline +0.235 (T01 hurts 30d when current strategy already positive). T02 (min_top_win=0.68): daily 4 bets ROI=-1.0. T03 (max_odds=50): daily 6 bets ROI=-1.0 (identical). T04 (max_odds=55): daily 6 bets ROI=-1.0 (identical). T05 (top_win=0.70+max_odds=55): daily 3 bets ROI=-1.0. Key observation: baseline 30d is now solidly positive (+0.235 with 236 bets, 16 hits). The T01 (min_top_win=0.70) pattern from 2026-04-08 run shows 30d ROI deteriorates compared to baseline when baseline is already positive — do NOT pursue min_top_win=0.70 adoption anymore. Current strategy (required_third_lane=0, min_top_win=0.65) is stable with positive 30d ROI. Strategy unchanged. odds_refresh.remaining_missing=25."
+    }
   ]
 }
