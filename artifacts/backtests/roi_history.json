@@ -294,5 +294,33 @@
       "odds_refresh_remaining_missing": 25,
       "notes": "NO IMPROVEMENT. baseline_daily: 8 bets, ROI=-1.0 (0 hits). baseline_30d: 232 bets, ROI=+0.0966 (12 hits, 5.17% hit rate) — now positive again (2026-03-12 to 2026-04-10 window). Trials 01-05 all had daily ROI=-1.0 (0 hits), failing the 単日 ROI > baseline condition. T01 (min_top_win=0.70): daily 6 bets ROI=-1.0, 30d 120 bets ROI=-0.29 — worse than baseline +0.097. T02 (min_top_win=0.68): daily 6 bets ROI=-1.0. T03 (max_odds=50): daily 7 bets ROI=-1.0. T04 (min_top_win=0.60): daily 9 bets ROI=-1.0, 30d 361 bets ROI=+0.026 — worse than baseline +0.097 though more bets. T05 (required_second_lane=0): daily 18 bets ROI=-1.0. On 2026-04-10, all bets under all configurations lost — no filter adjustment can improve single-day ROI when no candidates win. Key observation: baseline 30d is positive (+0.097, 232 bets) — current strategy performing well overall. T01 (min_top_win=0.70) hurts 30d ROI (−0.29 vs +0.097), confirming min_top_win=0.70 is too aggressive when baseline is positive. Strategy unchanged. odds_refresh.remaining_missing=25 (2026-04-02 venue 12 + 2026-04-04 venue 12 + prior 1)."
     }
+  ,
+    {
+      "date": "2026-04-12",
+      "target_date": "2026-04-11",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.65,
+        "min_expected_value": 1.5
+      },
+      "baseline_daily_roi": 3.228571,
+      "candidate_daily_roi": 6.4,
+      "baseline_30d_roi": 0.360386,
+      "candidate_30d_roi": 0.815517,
+      "recommendation_bets": 8,
+      "recommendation_hits": 1,
+      "recommendation_hit_rate": 0.125,
+      "recommendation_return": 5920,
+      "recommendation_profit": 5120,
+      "daily_backtest_file": "backtest_20260411_trial_02_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260411_trial_02_30d.json",
+      "params_changed": {
+        "min_expected_value": 1.5
+      },
+      "odds_refresh_remaining_missing": 12,
+      "notes": "IMPROVEMENT ADOPTED. min_expected_value=1.5 added to overrides. Baseline single-day ROI=3.229 (14 bets, 1 hit at odds 59.2). T02 improved daily ROI to 6.4 (8 bets, 1 hit, 12.5% hit rate, profit=5120). 30d ROI improved from 0.360 (207 bets, 13 hits) to 0.816 (116 bets, 9 hits, 7.8%). EV filter cuts low-quality bets while retaining high-EV candidates. T01(min_ev=1.2): daily 3.554, 30d 0.418 — eligible but weaker. T03(min_top=0.68): daily 5.578 but 30d 0.179 < baseline, rejected. T04(min_top=0.70): daily -1.0, rejected. T05(min_top=0.68+min_ev=1.5): daily 10.84, 30d 0.664 — eligible but lower 30d than T02. odds_refresh.remaining_missing=12 (2026-04-04 venue 12 still missing)."
+    }
   ]
 }
