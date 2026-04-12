@@ -322,5 +322,33 @@
       "odds_refresh_remaining_missing": 12,
       "notes": "IMPROVEMENT ADOPTED. min_expected_value=1.5 added to overrides. Baseline single-day ROI=3.229 (14 bets, 1 hit at odds 59.2). T02 improved daily ROI to 6.4 (8 bets, 1 hit, 12.5% hit rate, profit=5120). 30d ROI improved from 0.360 (207 bets, 13 hits) to 0.816 (116 bets, 9 hits, 7.8%). EV filter cuts low-quality bets while retaining high-EV candidates. T01(min_ev=1.2): daily 3.554, 30d 0.418 — eligible but weaker. T03(min_top=0.68): daily 5.578 but 30d 0.179 < baseline, rejected. T04(min_top=0.70): daily -1.0, rejected. T05(min_top=0.68+min_ev=1.5): daily 10.84, 30d 0.664 — eligible but lower 30d than T02. odds_refresh.remaining_missing=12 (2026-04-04 venue 12 still missing)."
     }
+  ,
+    {
+      "date": "2026-04-13",
+      "target_date": "2026-04-12",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.65,
+        "min_expected_value": 1.2
+      },
+      "baseline_daily_roi": -1.0,
+      "candidate_daily_roi": 0.608333,
+      "baseline_30d_roi": -0.249254,
+      "candidate_30d_roi": -0.203488,
+      "recommendation_bets": 12,
+      "recommendation_hits": 1,
+      "recommendation_hit_rate": 0.083333,
+      "recommendation_return": 1930,
+      "recommendation_profit": 730,
+      "daily_backtest_file": "backtest_20260412_trial_01_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260412_trial_01_30d.json",
+      "params_changed": {
+        "min_expected_value": 1.2
+      },
+      "odds_refresh_remaining_missing": 25,
+      "notes": "IMPROVEMENT ADOPTED. min_expected_value reduced from 1.5 to 1.2. Baseline daily: 7 bets ROI=-1.0 (0 hits). T01 daily: 12 bets ROI=0.608 (1 hit, return=1930, profit=730). 30d ROI improved from -0.249 to -0.204 (172 bets, 9 hits vs 134 bets, 7 hits). Lowering EV threshold adds more candidates in the 30d window; the winning bets have EV between 1.2-1.5. T02 (top_win=0.60): daily -1.0 (8 bets, 0 hits). T03 (ev=1.3): daily -1.0 (10 bets, 0 hits). T04 (max_odds=70): daily -1.0 (7 bets, identical to baseline). T05 (top_win=0.62+ev=1.2): daily 0.485 (13 bets, 1 hit) but 30d -0.293 worse than baseline — rejected. odds_refresh.remaining_missing=25 (2026-03-30:1, 2026-04-02:12, 2026-04-04:12)."
+    }
   ]
 }
