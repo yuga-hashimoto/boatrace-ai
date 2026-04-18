@@ -428,5 +428,34 @@
       "odds_refresh_remaining_missing": 25,
       "notes": "NO IMPROVEMENT. baseline_daily: 5 bets, ROI=-1.0 (0 hits). baseline_30d: 187 bets, ROI=-0.207 (7 hits, 3.7% hit rate, profit=-3880). Trials 01-05 all had daily ROI=-1.0 (0 hits), failing the single-day adoption condition — on 2026-04-17 no candidate bets won regardless of parameter settings. T01 (min_ev=1.5): daily 5 bets ROI=-1.0, 30d 135 bets ROI=-0.045 — strong 30d improvement vs baseline -0.207 (4th consecutive day showing this pattern). T02 (required_second_lane=0): daily 12 bets ROI=-1.0. T03 (max_market_odds=70): daily 7 bets ROI=-1.0. T04 (min_ev=1.0): daily 5 bets ROI=-1.0 (identical to baseline). T05 (top_win=0.60+ev=1.5): daily 6 bets ROI=-1.0. T01 (min_ev=1.5) continues to show consistent 30d ROI improvement pattern over multiple consecutive days: baseline 30d=-0.207 vs T01 30d=-0.045, saving ~25% in expected losses with 52 fewer bets. However, daily adoption condition (strict ROI > baseline) was not met today. odds_refresh.remaining_missing=25 (2026-04-02:12, 2026-04-04:12, prior:1)."
     }
+  ,
+    {
+      "date": "2026-04-19",
+      "target_date": "2026-04-18",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.68,
+        "min_expected_value": 1.5
+      },
+      "baseline_daily_roi": 0.364706,
+      "candidate_daily_roi": 1.9,
+      "baseline_30d_roi": -0.013953,
+      "candidate_30d_roi": 0.395413,
+      "recommendation_bets": 8,
+      "recommendation_hits": 1,
+      "recommendation_hit_rate": 0.125,
+      "recommendation_return": 2320,
+      "recommendation_profit": 1520,
+      "daily_backtest_file": "backtest_20260418_trial_05_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260418_trial_05_30d.json",
+      "params_changed": {
+        "min_top_win_probability": 0.68,
+        "min_expected_value": 1.5
+      },
+      "odds_refresh_remaining_missing": 0,
+      "notes": "IMPROVEMENT ADOPTED. T05 (top_win=0.68+min_ev=1.5). Baseline daily: 17 bets ROI=0.365 (1 hit, return=2320, profit=620). T05 daily: 8 bets ROI=1.9 (1 hit, return=2320, profit=1520) — same winning bet (venue 23 race 1, 1-4-2 odds 23.2 EV=1.89) retained, 9 losing bets eliminated. Baseline 30d: 215 bets ROI=-0.014 (10 hits). T05 30d: 109 bets ROI=0.395 (7 hits, profit=4310) — tighter filters cut low-EV bets while retaining quality positions. All 5 trials beat baseline daily ROI. T01(min_ev=1.5): daily 1.32, 30d 0.252. T02(top_win=0.68): daily 0.785, 30d 0.156. T04(min_ev=1.3): daily 0.785, 30d 0.016. T05 wins on both 30d and daily ROI. Pattern: after 4 consecutive days of min_ev=1.5 showing 30d improvement with no daily improvement, today both filters activated together produced the best result. odds_refresh.remaining_missing=0 (all dates current)."
+    }
   ]
 }

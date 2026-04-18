@@ -3,9 +3,9 @@
   "betting_preset": "monthly-roi",
   "overrides": {
     "required_third_lane": 0,
-    "min_top_win_probability": 0.65,
-    "min_expected_value": 1.2
+    "min_top_win_probability": 0.68,
+    "min_expected_value": 1.5
   },
-  "adopted_on": "2026-04-12",
-  "notes": "Updated 2026-04-12: reduced min_expected_value from 1.5 to 1.2. Previous: min_ev=1.5 (adopted 2026-04-11). Daily ROI improved from -1.0 to 0.608 (12 bets, 1 hit, profit=730). 30d ROI improved from -0.249 to -0.204 (172 bets, 9 hits). Lowering EV threshold from 1.5 to 1.2 captures additional winning bets (5 more bets in 30d window, 2 more hits). T05 (top_win=0.62+ev=1.2) rejected: 30d ROI=-0.293 worse than baseline. Monitor for stability."
+  "adopted_on": "2026-04-18",
+  "notes": "Updated 2026-04-18: min_top_win raised 0.65→0.68, min_ev raised 1.2→1.5 (T05: top_win=0.68+min_ev=1.5). Daily ROI improved from 0.365 to 1.9 (8 bets, 1 hit, profit=1520). 30d ROI improved from -0.014 to 0.395 (109 bets, 7 hits, profit=4310). Tightening both filters together cuts bets from 215 to 109 in 30d while retaining more winning bets (7 vs 10 baseline but much better ROI). Previous: top_win=0.65, min_ev=1.2 (adopted 2026-04-12). Monitor for stability."
 }
