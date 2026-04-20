@@ -483,5 +483,31 @@
       "odds_refresh_remaining_missing": 25,
       "notes": "NO IMPROVEMENT. baseline_daily: 7 bets, ROI=-1.0 (0 hits). baseline_30d: 90 bets, ROI=+0.032 (6 hits, 6.7% hit rate, profit=+290) — marginally positive. All 5 trials had daily ROI=-1.0 (0 hits), failing the single-day adoption condition — on 2026-04-19 no 1-4-X trifecta candidates won under any tested parameter configuration. T01 (top_win=0.65): daily 8 bets ROI=-1.0, 30d 127 bets ROI=+0.198; T02 (top_win=0.60): daily 9 bets ROI=-1.0; T03 (min_ev=1.2): daily 9 bets ROI=-1.0; T04 (2nd_lane=0): daily 15 bets ROI=-1.0; T05 (top_win=0.70): daily 5 bets ROI=-1.0, 30d 65 bets ROI=+0.429 — notable 30d improvement with fewer bets (65 vs 90 baseline, same 6 hits). T05 (min_top_win=0.70) 30d ROI pattern is strong (+0.429 vs baseline +0.032) — second consecutive day showing min_top_win=0.70 with strong 30d improvement. If next day also shows daily ROI improvement with top_win=0.70, consider adopting. odds_refresh.remaining_missing=25 (2026-04-02:12, 2026-04-04:12, prior:1)."
     }
+  ,
+    {
+      "date": "2026-04-21",
+      "target_date": "2026-04-20",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.68,
+        "min_expected_value": 1.5
+      },
+      "baseline_daily_roi": -1.0,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": 0.132927,
+      "candidate_30d_roi": null,
+      "recommendation_bets": 8,
+      "recommendation_hits": 0,
+      "recommendation_hit_rate": 0.0,
+      "recommendation_return": 0,
+      "recommendation_profit": -800,
+      "daily_backtest_file": "backtest_20260420_baseline_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260420_baseline_30d.json",
+      "params_changed": {},
+      "odds_refresh_remaining_missing": 0,
+      "notes": "NO IMPROVEMENT. baseline_daily: 8 bets, ROI=-1.0 (0 hits). baseline_30d: 82 bets, ROI=+0.133 (6 hits, 7.3% hit rate, profit=1090). All 5 trials had daily ROI=-1.0 (0 hits) — on 2026-04-20 no 1-4-X trifecta candidates won under any parameter configuration, making single-day improvement impossible. T01 (top_win=0.70, ev=1.5): daily 4 bets ROI=-1.0, 30d 54 bets ROI=+0.720 (6 hits, 11.1%, profit=3890) — strong 30d improvement vs baseline +0.133. T02 (top_win=0.65, ev=1.5): daily 9 bets ROI=-1.0. T03 (top_win=0.68, ev=1.2): daily 11 bets ROI=-1.0. T04 (top_win=0.70, ev=2.0): daily 4 bets ROI=-1.0. T05 (top_win=0.60, ev=1.5): daily 11 bets ROI=-1.0. Key observation: T01 (min_top_win=0.70, min_ev=1.5) shows 3rd consecutive day of strong 30d ROI improvement: 2026-04-19 T05(+0.429 vs baseline +0.032), 2026-04-20 T01(+0.720 vs baseline +0.133). Pattern is very consistent — tighter top_win=0.70 retains same winning bets with far fewer losers (54 vs 82 bets, same 6 hits in 30d). If next day shows any daily ROI improvement with top_win=0.70, consider adopting. odds_refresh.remaining_missing=0 (all dates current)."
+    }
   ]
 }
