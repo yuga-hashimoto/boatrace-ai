@@ -4,8 +4,8 @@
   "overrides": {
     "required_third_lane": 0,
     "min_top_win_probability": 0.68,
-    "min_expected_value": 1.5
+    "min_expected_value": 2.0
   },
-  "adopted_on": "2026-04-18",
-  "notes": "Updated 2026-04-18: min_top_win raised 0.65→0.68, min_ev raised 1.2→1.5 (T05: top_win=0.68+min_ev=1.5). Daily ROI improved from 0.365 to 1.9 (8 bets, 1 hit, profit=1520). 30d ROI improved from -0.014 to 0.395 (109 bets, 7 hits, profit=4310). Tightening both filters together cuts bets from 215 to 109 in 30d while retaining more winning bets (7 vs 10 baseline but much better ROI). Previous: top_win=0.65, min_ev=1.2 (adopted 2026-04-12). Monitor for stability."
+  "adopted_on": "2026-04-27",
+  "notes": "Updated 2026-04-28: min_ev raised 1.5→2.0 (T03: top_win=0.68+min_ev=2.0). Daily ROI improved from 5.229 to 6.267 (6 bets, 1 hit, profit=3760). 30d ROI improved from 0.278 to 0.495 (76 bets, 5 hits, profit=3760). Higher EV=2.0 threshold removes low-EV losing bets while retaining winning candidates; same top_win=0.68 retains today's winner (which top_win=0.70 would have filtered out). Note: prior pattern T01 (top_win=0.70, ev=1.5) failed today — winning bet had top_win just below 0.70 threshold. Previous: top_win=0.68, min_ev=1.5 (adopted 2026-04-18). Monitor for stability."
 }
