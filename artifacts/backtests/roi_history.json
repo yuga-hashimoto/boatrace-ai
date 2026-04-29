@@ -667,5 +667,31 @@
       "odds_refresh_remaining_missing": 0,
       "notes": "IMPROVEMENT ADOPTED. min_expected_value raised 1.5→2.0 (T03: top_win=0.68+min_ev=2.0). Baseline single-day: 7 bets ROI=5.229 (1 hit, return=4360, profit=3660). T03 daily: 6 bets ROI=6.267 (1 hit, return=4360, profit=3760) — same winning bet retained, 1 low-EV losing bet eliminated. Baseline 30d: 119 bets ROI=0.278 (7 hits, profit=3310). T03 30d: 76 bets ROI=0.495 (5 hits, profit=3760) — EV≥2.0 filter removed 43 low-EV losing bets while retaining high-EV winning bets; 30d ROI improved significantly. Note: prior pattern T01 (top_win=0.70, ev=1.5) that had shown 7 consecutive days of 30d improvement failed today (daily ROI=-1.0, 5 bets, 0 hits) — today's winner had top_win just below 0.70 threshold, confirming top_win=0.68 is the right level. T02 (top_win=0.70, ev=2.0): 4 bets, 0 hits. T04 (top_win=0.65, ev=1.5): 9 bets, roi=3.844 (worse daily). T05 (top_win=0.70, ev=1.2): 6 bets, 0 hits. T03 uniquely retains winning bet by keeping top_win=0.68 while raising EV threshold to 2.0. odds_refresh.remaining_missing=0 (daily), 25 (30d: 2026-04-02:12, 2026-04-04:12, prior:1)."
     }
+  ,
+    {
+      "date": "2026-04-30",
+      "target_date": "2026-04-29",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.68,
+        "min_expected_value": 2.0
+      },
+      "baseline_daily_roi": -1.0,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": 2.12459,
+      "candidate_30d_roi": null,
+      "recommendation_bets": 2,
+      "recommendation_hits": 0,
+      "recommendation_hit_rate": 0.0,
+      "recommendation_return": 0,
+      "recommendation_profit": -200,
+      "daily_backtest_file": "backtest_20260429_baseline_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260429_baseline_30d.json",
+      "params_changed": {},
+      "odds_refresh_remaining_missing": 0,
+      "notes": "NO IMPROVEMENT. baseline_daily: 2 bets, ROI=-1.0 (0 hits) — only 2 races selected on 2026-04-29 (venue 18 r11 1-4-3 odds=52.7 EV=2.905, venue 24 r12 1-4-3 odds=41.1 EV=2.294), both lost. baseline_30d: 61 bets, ROI=+2.125 (8 hits, 13.1% hit rate, profit=12960) — exceptionally strong 30d performance. Trials 01-05 all had daily ROI=-1.0 (0 hits), failing the single-day adoption condition. T01 (top_win=0.70, ev=2.0): 2 bets ROI=-1.0 (identical bets, identical result); T02 (top_win=0.68, ev=2.5): 1 bet ROI=-1.0 (invalid: bets<3); T03 (top_win=0.70, ev=2.5): 1 bet ROI=-1.0 (invalid: bets<3); T04 (top_win=0.68, ev=1.5): 4 bets ROI=-1.0 (0 hits); T05 (top_win=0.65, ev=2.0): 3 bets ROI=-1.0 (0 hits). On 2026-04-29, no 1-4-X trifecta candidates won under any tested parameter configuration. 30d trials not run as single-day condition was not met. 30d baseline is exceptionally strong (+2.125, 61 bets, 8 hits) — current strategy (top_win=0.68, min_ev=2.0) performing well; no change needed. odds_refresh.remaining_missing=0 (daily), 25 (30d: 2026-04-02:12, 2026-04-04:12, prior:1)."
+    }
   ]
 }
