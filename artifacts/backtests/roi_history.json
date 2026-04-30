@@ -693,5 +693,31 @@
       "odds_refresh_remaining_missing": 0,
       "notes": "NO IMPROVEMENT. baseline_daily: 2 bets, ROI=-1.0 (0 hits) — only 2 races selected on 2026-04-29 (venue 18 r11 1-4-3 odds=52.7 EV=2.905, venue 24 r12 1-4-3 odds=41.1 EV=2.294), both lost. baseline_30d: 61 bets, ROI=+2.125 (8 hits, 13.1% hit rate, profit=12960) — exceptionally strong 30d performance. Trials 01-05 all had daily ROI=-1.0 (0 hits), failing the single-day adoption condition. T01 (top_win=0.70, ev=2.0): 2 bets ROI=-1.0 (identical bets, identical result); T02 (top_win=0.68, ev=2.5): 1 bet ROI=-1.0 (invalid: bets<3); T03 (top_win=0.70, ev=2.5): 1 bet ROI=-1.0 (invalid: bets<3); T04 (top_win=0.68, ev=1.5): 4 bets ROI=-1.0 (0 hits); T05 (top_win=0.65, ev=2.0): 3 bets ROI=-1.0 (0 hits). On 2026-04-29, no 1-4-X trifecta candidates won under any tested parameter configuration. 30d trials not run as single-day condition was not met. 30d baseline is exceptionally strong (+2.125, 61 bets, 8 hits) — current strategy (top_win=0.68, min_ev=2.0) performing well; no change needed. odds_refresh.remaining_missing=0 (daily), 25 (30d: 2026-04-02:12, 2026-04-04:12, prior:1)."
     }
+  ,
+    {
+      "date": "2026-05-01",
+      "target_date": "2026-04-30",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.68,
+        "min_expected_value": 2.0
+      },
+      "baseline_daily_roi": -1.0,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": 2.167123,
+      "candidate_30d_roi": null,
+      "recommendation_bets": 4,
+      "recommendation_hits": 0,
+      "recommendation_hit_rate": 0.0,
+      "recommendation_return": 0,
+      "recommendation_profit": -400,
+      "daily_backtest_file": "backtest_20260430_baseline_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260430_baseline_30d.json",
+      "params_changed": {},
+      "odds_refresh_remaining_missing": 0,
+      "notes": "NO IMPROVEMENT. baseline_daily: 4 bets, ROI=-1.0 (0 hits) — venue 14 r4 (1-4-3 odds=44.3 EV=2.108), venue 14 r12 (1-4-3 odds=20.6 EV=2.383), venue 18 r5 (1-4-2 odds=51.6 EV=3.010), venue 24 r6 (1-4-3 odds=47.5 EV=3.109) all lost. baseline_30d: 73 bets, ROI=+2.167 (8 hits, 11.0% hit rate, profit=15820) — excellent 30d performance. Trials 01-05 all had daily ROI=-1.0 (0 hits), failing the single-day adoption condition — on 2026-04-30 no 1-4-X trifecta candidates won under any parameter configuration. T01 (min_ev=2.5): 2 bets ROI=-1.0 (invalid: bets<3); T02 (top_win=0.70, ev=2.0): 2 bets ROI=-1.0 (invalid: bets<3); T03 (top_win=0.65, ev=2.0): 4 bets ROI=-1.0; T04 (min_ev=1.5): 9 bets ROI=-1.0 (0 hits); T05 (top_win=0.70, ev=1.5): 7 bets ROI=-1.0 (0 hits). Single-day improvement impossible when no candidates win. 30d baseline is exceptionally strong (+2.167, 73 bets, 8 hits) — best 30d ROI in recent history. odds_refresh.remaining_missing=0 (daily), 25 (30d: 2026-04-02:12, 2026-04-04:12, prior:1)."
+    }
   ]
 }
