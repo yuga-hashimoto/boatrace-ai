@@ -745,5 +745,31 @@
       "odds_refresh_remaining_missing": 0,
       "notes": "NO IMPROVEMENT. baseline_daily: 2 bets, ROI=-1.0 (0 hits). baseline_30d: 82 bets, ROI=+0.173 (4 hits, 4.9% hit rate, profit=1420) — positive. Trials 01-05 all had daily ROI=-1.0 (0 hits), failing the single-day adoption condition — on 2026-05-01 no 1-4-X trifecta candidates won under any parameter configuration. T01 (top_win=0.65, ev=2.0): 2 bets ROI=-1.0 (same bets as baseline, no effect); T02 (top_win=0.70, ev=2.0): 1 bet ROI=-1.0 (invalid: bets<3, tighter filter removed 1 of 2 bets); T03 (top_win=0.68, ev=1.5): 4 bets ROI=-1.0 (lowering EV added 2 candidates but all lost); T04 (top_win=0.60, ev=2.0): 4 bets ROI=-1.0 (relaxed top_win added candidates but all lost); T05 (top_win=0.65, ev=1.5): 5 bets ROI=-1.0 (most relaxed, all 5 lost). Single-day improvement impossible when no candidates win on target date. 30d baseline is healthy (+0.173, 82 bets, 4 hits). odds_refresh.remaining_missing=0 (daily), 25 (30d: 2026-04-02:12, 2026-04-04:12, prior:1)."
     }
+  ,
+    {
+      "date": "2026-05-03",
+      "target_date": "2026-05-02",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.68,
+        "min_expected_value": 2.0
+      },
+      "baseline_daily_roi": 13.3,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": 1.288043,
+      "candidate_30d_roi": null,
+      "recommendation_bets": 2,
+      "recommendation_hits": 1,
+      "recommendation_hit_rate": 0.5,
+      "recommendation_return": 2860,
+      "recommendation_profit": 2660,
+      "daily_backtest_file": "backtest_20260502_baseline_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260502_baseline_30d.json",
+      "params_changed": {},
+      "odds_refresh_remaining_missing": 0,
+      "notes": "NO IMPROVEMENT. baseline_daily: 2 bets, ROI=+13.3 (1 hit, return=2860, profit=2660) — high ROI day. baseline_30d: 92 bets, ROI=+1.288 (7 hits, 7.6% hit rate, profit=11850) — excellent 30d performance. Trials 01-05 all had daily ROI lower than baseline +13.3, failing the single-day adoption condition. T01 (min_ev=1.5): 5 bets ROI=4.72 (1 hit); T02 (min_ev=1.8): 3 bets ROI=8.533 (1 hit); T03 (top_win=0.65, ev=2.0): 4 bets ROI=6.15 (1 hit); T04 (top_win=0.65, ev=1.5): 9 bets ROI=2.178 (1 hit); T05 (ev=2.5): 1 bet ROI=27.6 (invalid: bets<3). All relaxations add losing bets that dilute the winning bet's ROI below baseline 13.3. T05 (ev=2.5) would retain only the higher-quality winner (ROI=27.6) but bets<3 rule makes it invalid. Single-day improvement impossible on high-ROI baseline days — adding bets always dilutes ROI unless added bets also win. 30d trials not run (no daily candidate passed). 30d baseline is excellent (+1.288, 92 bets, 7 hits). odds_refresh.remaining_missing=0 (daily), 25 (30d: 2026-04-02:12, 2026-04-04:12, prior:1)."
+    }
   ]
 }
