@@ -823,5 +823,31 @@
       "odds_refresh_remaining_missing": 24,
       "notes": "NO IMPROVEMENT. baseline_daily: 1 bet, ROI=-1.0 (0 hits) — only 1 race on 2026-05-04 passed 1-4-X lane + min_top_win=0.68 + min_ev=2.0 filters; venue 09 and venue 11 (24 races total) were missing from sync. baseline_30d: 80 bets, ROI=+1.348 (6 hits, 7.5% hit rate, profit=10780) — excellent 30d performance. Trials 01-05 all had daily ROI=-1.0 or null (0 bets), failing the single-day adoption condition. T01 (top_win=0.65, ev=2.0): 1 bet ROI=-1.0 (same as baseline, EV filter dominates); T02 (top_win=0.68, ev=1.5): 2 bets ROI=-1.0 (added 1 more candidate but it also lost); T03 (top_win=0.70, ev=2.0): 0 bets ROI=null (tightening top_win removes the 1 qualifying bet); T04 (top_win=0.65, ev=1.5): 3 bets ROI=-1.0 (3 candidates all lost); T05 (top_win=0.68, ev=2.5): 0 bets ROI=null (too strict). On 2026-05-04, no 1-4-X trifecta candidates won under any parameter configuration. 30d baseline is excellent (+1.348, 80 bets, 6 hits) — consistent strong performance. 30d trials not run as no daily candidate passed. odds_refresh.remaining_missing=24 (venue 09: 12 races, venue 11: 12 races unavailable during sync)."
     }
+  ,
+    {
+      "date": "2026-05-06",
+      "target_date": "2026-05-05",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.68,
+        "min_expected_value": 2.0
+      },
+      "baseline_daily_roi": -1.0,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": 0.710811,
+      "candidate_30d_roi": null,
+      "recommendation_bets": 1,
+      "recommendation_hits": 0,
+      "recommendation_hit_rate": 0.0,
+      "recommendation_return": 0,
+      "recommendation_profit": -100,
+      "daily_backtest_file": "backtest_20260505_baseline_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260505_baseline_30d.json",
+      "params_changed": {},
+      "odds_refresh_remaining_missing": 25,
+      "notes": "NO IMPROVEMENT. baseline_daily: 1 bet, ROI=-1.0 (0 hits) — only 1 race on 2026-05-05 passed 1-4-X lane + min_top_win=0.68 + min_ev=2.0 filters. baseline_30d: 74 bets, ROI=+0.711 (4 hits, 5.4% hit rate, profit=+5260) — healthy positive performance. Trials 01-05 all had daily ROI=-1.0 or null (0 bets), failing the single-day adoption condition — on 2026-05-05 no 1-4-X trifecta candidates won under any tested parameter configuration. T01 (top_win=0.65, ev=2.0): 1 bet ROI=-1.0 (same bet as baseline, top_win relaxation had no effect); T02 (top_win=0.68, ev=1.5): 4 bets ROI=-1.0 (EV relaxation added 3 more candidates, all lost); T03 (top_win=0.65, ev=1.5): 7 bets ROI=-1.0 (both relaxed, 7 candidates, all lost); T04 (top_win=0.70, ev=2.0): 1 bet ROI=-1.0 (tighter top_win, same result); T05 (top_win=0.68, ev=2.5): 0 bets ROI=null (tighter EV removed the 1 qualifying bet, invalid). Single-day improvement impossible when no 1-4-X candidates win. 30d baseline is healthy (+0.711, 74 bets, 4 hits) — solid positive ROI. 30d trials not run as no daily candidate passed. odds_refresh.remaining_missing=25 (30d window: 2026-04-02:12, 2026-04-04:12, prior:1)."
+    }
   ]
 }
