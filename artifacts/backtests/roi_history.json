@@ -841,6 +841,31 @@
       "params_changed": {},
       "odds_refresh_remaining_missing": 25,
       "notes": "No improvement. 2026-05-06 was a losing day (4 bets, 0 hits, ROI=-1.0). All 5 trials also had 0 hits and daily ROI=-1.0. T02 invalid (bets=2 < 3). T04 (min_market_odds=20) showed 30d improvement (ROI=1.106 vs baseline 1.0, bets=113) but single-day condition not met (both -1.0). Monitor T04 in next sessions before adoption."
+    },
+    {
+      "date": "2026-05-08",
+      "target_date": "2026-05-07",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.68,
+        "min_expected_value": 2.0
+      },
+      "baseline_daily_roi": null,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": 0.706494,
+      "candidate_30d_roi": null,
+      "recommendation_bets": 0,
+      "recommendation_hits": 0,
+      "recommendation_hit_rate": null,
+      "recommendation_return": 0,
+      "recommendation_profit": 0,
+      "daily_backtest_file": "backtest_20260507_baseline_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260507_baseline_30d.json",
+      "params_changed": {},
+      "odds_refresh_remaining_missing": 25,
+      "notes": "No improvement. 2026-05-07 baseline had 0 bets (min_top_win=0.68 + min_ev=2.0 + required_third_lane=0 found no qualifying 1-X-X candidates). T01 (top_win=0.65, ev=2.0): 4 bets ROI=-1.0, 0 hits; T02 (top_win=0.68, ev=1.8): 0 bets; T03 (top_win=0.65, ev=1.8): 4 bets ROI=-1.0, 0 hits; T04 (top_win=0.68, ev=2.0, min_odds=20): daily=0 bets, 30d ROI=0.729 vs baseline_30d=0.706 (slight improvement) but daily adoption condition not met; T05 (top_win=0.65, ev=2.0, min_odds=20): 4 bets ROI=-1.0, 0 hits. On 2026-05-07, no lane-1-first trifecta candidates won under any tested configuration. T04 (min_market_odds=20) continues to show 30d ROI improvement (0.729 > 0.706), now confirmed over 2 days (2026-05-06: 1.106 vs 1.0; 2026-05-07: 0.729 vs 0.706). Monitor 1 more day before adoption. odds_refresh.remaining_missing=25 (2026-05-04: 24 missing, 2026-05-03: 1 missing)."
     }
   ]
 }
