@@ -891,6 +891,31 @@
       "params_changed": {},
       "odds_refresh_remaining_missing": 37,
       "notes": "No improvement. 2026-05-09 had 0 bets under all tested configurations (baseline: top_win=0.68+ev=2.0+no_third=0; T01-T05 all returned 0 bets for this day). Single-day adoption condition cannot be confirmed (all None). T01 (min_market_odds=20) 30d ROI=0.583 > baseline_30d=0.528 — continues 3rd consecutive day of 30d improvement (2026-05-06: 1.106 vs 1.0; 2026-05-07: 0.729 vs 0.706; 2026-05-09: 0.583 vs 0.528). T04 (top_win=0.65, min_market_odds=20) 30d ROI=0.143 < baseline_30d=0.528 — rejected. T01 30d improvement now confirmed 3 consecutive days; adoption pending next day with valid single-day comparison."
+    },
+    {
+      "date": "2026-05-15",
+      "target_date": "2026-05-14",
+      "strategy_name": "monthly-roi",
+      "betting_preset": "monthly-roi",
+      "overrides": {
+        "required_third_lane": 0,
+        "min_top_win_probability": 0.68,
+        "min_expected_value": 2.0
+      },
+      "baseline_daily_roi": -1.0,
+      "candidate_daily_roi": null,
+      "baseline_30d_roi": 0.978082,
+      "candidate_30d_roi": 1.005556,
+      "recommendation_bets": 4,
+      "recommendation_hits": 0,
+      "recommendation_hit_rate": 0.0,
+      "recommendation_return": 0,
+      "recommendation_profit": -400,
+      "daily_backtest_file": "backtest_20260514_baseline_daily.json",
+      "rolling_30d_backtest_file": "backtest_20260514_baseline_30d.json",
+      "params_changed": {},
+      "odds_refresh_remaining_missing": 0,
+      "notes": "NO IMPROVEMENT. baseline_daily: 4 bets, ROI=-1.0 (0 hits). baseline_30d: 73 bets, ROI=+0.978 (4 hits, 5.5% hit rate, profit=+7140) — healthy positive performance. All 5 trials had daily ROI=-1.0 (0 hits), failing the single-day adoption condition — on 2026-05-14 no 1-4-X trifecta candidates won under any parameter configuration. T01 (min_market_odds=20): daily 4 bets ROI=-1.0, 30d 72 bets ROI=+1.006 (4 hits, profit=+7240) — 4th consecutive day of 30d improvement: 2026-05-06(1.106 vs 1.0), 2026-05-07(0.729 vs 0.706), 2026-05-09(0.583 vs 0.528), 2026-05-14(1.006 vs 0.978). T02 (min_ev=2.5): daily 3 bets ROI=-1.0. T03 (top_win=0.70): daily 3 bets ROI=-1.0. T04 (top_win=0.65+min_odds=20): daily 4 bets ROI=-1.0. T05 (max_odds=55): daily 4 bets ROI=-1.0. T01 (min_market_odds=20) has now shown 4 consecutive days of 30d improvement with minimal reduction in bets (72 vs 73). Pattern: adding a minimum odds floor of 20 consistently filters out 1 low-value candidate while retaining the same winning bets. If next day shows daily ROI improvement with min_market_odds=20, adopt immediately."
     }
   ]
 }
